@@ -3,9 +3,24 @@
 #include <iostream>
 #include <cassert>
 #include<cstdlib>
+#include<time.h>
 
 using std::cout;
 using std::endl;
+
+void mat_vec_mult(int *mat, int *vec, int *res, int num_rows, int num_cols)
+{
+    for(int i = 0; i < num_rows; i ++)
+    {
+        int temp_res = 0;
+        for (int j = 0; j < num_cols; j ++)
+        {
+            temp_res += mat[i * num_cols + j] * vec[j];
+        }
+
+        res[i] = temp_res;
+    }
+}
 
 __global__ void mat_mult_kernel(int *a, int *b, int *c, int mat_rows, int mat_cols) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -24,24 +39,32 @@ int main (int args, char **argv) {
     int num_cols = atoi(argv[2]);
 
     int *a = (int *) malloc(sizeof(int) * num_rows * num_cols);
-    int *b = (int *) malloc(sizeof(int) * num_rows * num_cols);
+    int *b = (int *) malloc(sizeof(int) * num_cols);
     int *c = new int[num_rows];
 
+    srand(time(NULL));
+    // Initialize matrix
+    cout << "Matrix (a):" << endl;
     for (int i = 0; i < num_rows; i++) {
         for (int j = 0; j < num_cols; j++) {
-            a[i * num_cols + j] = rand() % 10;
+            int el = rand() % 10;
+            a[i * num_cols + j] = el;
+            cout << el << ", ";
         }
+        cout << endl;
     }
 
+    // Initialize vector
+    cout << "Vector (b):" << endl;
     for (int i = 0; i < num_cols; i++) {
-        for (int j = 0; j < num_rows; j++) {
-            b[i * num_rows + j] = rand() % 5;
-        }
+        int el = rand() % 5;
+        b[i] = el;
+        cout << el << endl;
     }
 
     int *a_d, *b_d, *c_d;
     cudaMalloc((void **) &a_d, sizeof (int) * num_rows * num_cols);
-    cudaMalloc((void **) &b_d, sizeof (int) * num_rows * num_cols);
+    cudaMalloc((void **) &b_d, sizeof (int) * num_cols);
     cudaMalloc((void **) &c_d, sizeof (int) * num_rows);
 
     cudaMemcpy (a_d, a, sizeof (int) * num_rows * num_cols, cudaMemcpyHostToDevice);
@@ -50,44 +73,14 @@ int main (int args, char **argv) {
 
     cudaMemcpy (c, c_d, sizeof (int) * num_rows, cudaMemcpyDeviceToHost);
 
-    cout << "A (mat):" << endl;
-    for (int i = 0; i < num_rows; i++) {
-        for (int j = 0; j < num_cols; j++) {
-            cout << a[i * num_cols +j] << ", ";
-        }
-        cout << endl;
-    }
-
-    cout << "B (mat2):" << endl;
-    for (int i = 0; i < num_cols; i++) {
-        for (int j = 0; j < num_rows; j++) {
-            cout << a[i * num_rows +j] << ", ";
-        }
-        cout << endl;
-    } 
-
-    cout << "C (result):" << endl;
-    for (int i = 0; i < num_rows; i++) {
-        for (int j = 0; j < num_rows; j++) {
-            cout << a[i * num_rows +j] << ", ";
-        }
-        cout << endl;
-    }
-
     int *test_res = new int[num_rows];
-    for(int i = 0; i < num_rows; i ++)
-    {
-        for (int j = 0; j < num_cols; j ++)
-        {
-            int temp_res = 0;
-            for (int k = 0; k < num_rows; k++) {
-                temp_res += a[i * num_cols + k] * b[k * num_rows + j];
-            }
-        }
-        test_res[i * num_cols + j] = temp_res;
-    }
+    mat_vec_mult(a, b, test_res, num_rows, num_cols);
     for (int i = 0; i < num_rows; i++) {
         assert(c[i] == test_res[i]);
     }
-    cout << "Correct results" << endl;
+
+    cout << "Result (c):" << endl;
+    for (int i = 0; i < num_rows; i++) {
+        cout << a[i] << endl;
+    }
 }

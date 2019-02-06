@@ -1,3 +1,7 @@
+/**
+  Jacob Sword
+  Parallelized multiplication of matrix and vector of random values given matrix dimensions
+**/
 #include <stdio.h>
 #include <stdlib.h>
 #include <iostream>

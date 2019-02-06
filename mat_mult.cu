@@ -6,8 +6,8 @@
 #include <stdlib.h>
 #include <iostream>
 #include <cassert>
-#include<cstdlib>
-#include<time.h>
+#include <cstdlib>
+#include <time.h>
 
 using std::cout;
 using std::endl;
@@ -16,10 +16,11 @@ void mat_mult(int *mat_a, int *mat_b, int *result, int a_rows, int a_cols, int b
 {
     for (int i = 0; i < a_rows; i++) {
         for (int j = 0; j < b_cols; j++) {
-            result[i * b_cols + j] = 0;
+            int temp_res = 0;
             for (int k = 0; k < a_cols; k++) {
-                result[i * b_cols + j] += mat_a[i * a_cols + k] * mat_b[k * b_cols + j];
+                temp_res += mat_a[i * a_cols + k] * mat_b[k * b_cols + j];
             }
+            result[i * b_cols + j] = temp_res;
         }
     }
 }
@@ -28,10 +29,11 @@ __global__ void mat_mult_kernel(int *mat_a, int *mat_b, int *result, int a_rows,
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     while (tid < a_rows) {
         for (int j = 0; j < b_cols; j++) {
-            result[tid * b_cols + j] = 0;
+            int temp_res = 0;
             for (int k = 0; k < a_cols; k++) {
-                result[tid * b_cols + j] += mat_a[tid * a_cols + k] * mat_b[k * b_cols + j];
+                temp_res  += mat_a[tid * a_cols + k] * mat_b[k * b_cols + j];
             }
+            result[tid * b_cols + j] = temp_res;
         }
         tid += blockDim.x * gridDim.x;
     }
@@ -100,18 +102,15 @@ int main (int argc, char **argv) {
 
     mat_mult(a, b, test_res, a_rows, a_cols, b_cols);
     for (int i = 0; i < a_rows; i++) {
-        for (int j = 0; j < b_rows; j++){
-            if (c[i * a_rows + j] != test_res[i * a_rows + j]) {
-                cout << c[i * a_rows + j] << " " << test_res[i * a_rows + j] << endl;
-            }
-            assert(c[i * a_rows + j] == test_res[i * a_rows + j]);
+        for (int j = 0; j < b_cols; j++){
+            assert(c[i * b_cols + j] == test_res[i * b_cols + j]);
         }
     }
 
     cout << "Result matrix:" << endl;
     for (int i = 0; i < a_rows; i++) {
-        for (int j = 0; j < b_rows; j++){
-            cout << c[i * a_rows + j] << ", ";
+        for (int j = 0; j < b_cols; j++) {
+            cout << c[i * b_cols + j] << ", ";
         }
         cout << endl;
     }

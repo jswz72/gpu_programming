@@ -12,33 +12,36 @@
 using std::cout;
 using std::endl;
 
-void mat_mult(int *mat, int *vec, int *res, int num_rows, int num_cols)
+void mat_mult(int *mat_a, int *mat_b, int *result, int a_rows, int a_cols, int b_cols)
 {
-    for(int i = 0; i < num_rows; i ++)
-    {
-        int temp_res = 0;
-        for (int j = 0; j < num_cols; j ++)
-        {
-            temp_res += mat[i * num_cols + j] * vec[j];
+    for (int i = 0; i < a_rows; i++) {
+        for (int j = 0; j < b_cols; j++) {
+            result[i * b_cols + j] = 0;
+            for (int k = 0; k < a_cols; k++) {
+                result[i * b_cols + j] += mat_a[i * a_cols + k] * mat_b[k * b_cols + j];
+            }
         }
-
-        res[i] = temp_res;
     }
 }
 
-__global__ void mat_mult_kernel(int *matrix_a, int *matrix_b, int *result, int a_cols, int a_rows, int b_cols, int b_rows) {
+__global__ void mat_mult_kernel(int *mat_a, int *mat_b, int *result, int a_rows, int a_cols, int b_cols) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    while (tid < mat_rows) {
-        int res = 0;
-        for (int i = 0; i < mat_cols; i++) {
-            res += a[tid * mat_cols + i] * b[i];
+    while (tid < a_rows) {
+        for (int j = 0; j < b_cols; j++) {
+            result[tid * b_cols + j] = 0;
+            for (int k = 0; k < a_cols; k++) {
+                result[tid * b_cols + j] += mat_a[tid * a_cols + k] * mat_b[k * b_cols + j];
+            }
         }
-        c[tid] = res;
         tid += blockDim.x * gridDim.x;
     }
 }
 
-int main (int args, char **argv) {
+int main (int argc, char **argv) {
+    if (argc < 5) {
+        cout << "Need a_row a_col b_row b_col" << endl;
+        return 1;
+    }
     int a_rows = atoi(argv[1]);
     int a_cols = atoi(argv[2]);
 
@@ -89,23 +92,26 @@ int main (int args, char **argv) {
 
     cudaMemcpy (a_d, a, sizeof (int) * a_dims, cudaMemcpyHostToDevice);
     cudaMemcpy (b_d, b, sizeof (int) * b_dims, cudaMemcpyHostToDevice);
-    mat_mult_kernel <<< 256, 256 >>> (a_d, b_d, c_d, a_rows, a_cols, b_rows, b_cols);
+    mat_mult_kernel <<< 256, 256 >>> (a_d, b_d, c_d, a_rows, a_cols, b_cols);
 
     cudaMemcpy (c, c_d, sizeof (int) * c_dims, cudaMemcpyDeviceToHost);
 
     int *test_res = (int *) malloc(sizeof(int) * c_dims);
 
-    mat_vec_mult(a, b, test_res, a_rows, a_cols, b_rows, b_cols);
+    mat_mult(a, b, test_res, a_rows, a_cols, b_cols);
     for (int i = 0; i < a_rows; i++) {
         for (int j = 0; j < b_rows; j++){
+            if (c[i * a_rows + j] != test_res[i * a_rows + j]) {
+                cout << c[i * a_rows + j] << " " << test_res[i * a_rows + j] << endl;
+            }
             assert(c[i * a_rows + j] == test_res[i * a_rows + j]);
         }
     }
 
-    cout << "Result (c):" << endl;
+    cout << "Result matrix:" << endl;
     for (int i = 0; i < a_rows; i++) {
         for (int j = 0; j < b_rows; j++){
-            cout << (c[i * a_rows + j] << ", ";
+            cout << c[i * a_rows + j] << ", ";
         }
         cout << endl;
     }

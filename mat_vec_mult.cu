@@ -85,6 +85,6 @@ int main (int args, char **argv) {
 
     cout << "Result (c):" << endl;
     for (int i = 0; i < num_rows; i++) {
-        cout << a[i] << endl;
+        cout << c[i] << endl;
     }
 }

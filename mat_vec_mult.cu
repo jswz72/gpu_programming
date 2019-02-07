@@ -6,12 +6,14 @@
 #include <stdlib.h>
 #include <iostream>
 #include <cassert>
-#include<cstdlib>
-#include<time.h>
+#include <cstdlib>
+#include <time.h>
+#include "./error_handler.h"
 
 using std::cout;
 using std::endl;
 
+// Sequential implementation of matrix x vector
 void mat_vec_mult(int *mat, int *vec, int *res, int num_rows, int num_cols)
 {
     for(int i = 0; i < num_rows; i ++)
@@ -26,6 +28,7 @@ void mat_vec_mult(int *mat, int *vec, int *res, int num_rows, int num_cols)
     }
 }
 
+// Parllel implementation of matrix x vector
 __global__ void mat_mult_kernel(int *a, int *b, int *c, int mat_rows, int mat_cols) {
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     while (tid < mat_rows) {
@@ -67,16 +70,17 @@ int main (int args, char **argv) {
     }
 
     int *a_d, *b_d, *c_d;
-    cudaMalloc((void **) &a_d, sizeof (int) * num_rows * num_cols);
-    cudaMalloc((void **) &b_d, sizeof (int) * num_cols);
-    cudaMalloc((void **) &c_d, sizeof (int) * num_rows);
+    HANDLE_ERR(cudaMalloc((void **) &a_d, sizeof (int) * num_rows * num_cols));
+    HANDLE_ERR(cudaMalloc((void **) &b_d, sizeof (int) * num_cols));
+    HANDLE_ERR(cudaMalloc((void **) &c_d, sizeof (int) * num_rows));
 
-    cudaMemcpy (a_d, a, sizeof (int) * num_rows * num_cols, cudaMemcpyHostToDevice);
-    cudaMemcpy (b_d, b, sizeof (int) * num_cols, cudaMemcpyHostToDevice);
+    HANDLE_ERR(cudaMemcpy (a_d, a, sizeof (int) * num_rows * num_cols, cudaMemcpyHostToDevice));
+    HANDLE_ERR(cudaMemcpy (b_d, b, sizeof (int) * num_cols, cudaMemcpyHostToDevice));
     mat_mult_kernel <<< 256, 256 >>> (a_d, b_d, c_d, num_rows, num_cols);
 
-    cudaMemcpy (c, c_d, sizeof (int) * num_rows, cudaMemcpyDeviceToHost);
+    HANDLE_ERR(cudaMemcpy (c, c_d, sizeof (int) * num_rows, cudaMemcpyDeviceToHost));
 
+    //Make sure parallel work is equal to sequential work (for testing)
     int *test_res = new int[num_rows];
     mat_vec_mult(a, b, test_res, num_rows, num_cols);
     for (int i = 0; i < num_rows; i++) {

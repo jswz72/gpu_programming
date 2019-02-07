@@ -1,6 +1,6 @@
 /**
   Jacob Sword
-  Parallelized multiplication of two matrices given dimensions of each
+  Parallelized multiplication of two randomized matrices given dimensions of each
 **/
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <time.h>
+#include "./error_handler.h"
 
 using std::cout;
 using std::endl;
@@ -88,18 +89,19 @@ int main (int argc, char **argv) {
     }
 
     int *a_d, *b_d, *c_d;
-    cudaMalloc((void **) &a_d, sizeof (int) * a_dims);
-    cudaMalloc((void **) &b_d, sizeof (int) * b_dims);
-    cudaMalloc((void **) &c_d, sizeof (int) * c_dims);
+    HANDLE_ERR(cudaMalloc((void **) &a_d, sizeof (int) * a_dims));
+    HANDLE_ERR(cudaMalloc((void **) &b_d, sizeof (int) * b_dims));
+    HANDLE_ERR(cudaMalloc((void **) &c_d, sizeof (int) * c_dims));
 
-    cudaMemcpy (a_d, a, sizeof (int) * a_dims, cudaMemcpyHostToDevice);
-    cudaMemcpy (b_d, b, sizeof (int) * b_dims, cudaMemcpyHostToDevice);
+    HANDLE_ERR(cudaMemcpy (a_d, a, sizeof (int) * a_dims, cudaMemcpyHostToDevice));
+    HANDLE_ERR(cudaMemcpy (b_d, b, sizeof (int) * b_dims, cudaMemcpyHostToDevice));
     mat_mult_kernel <<< 256, 256 >>> (a_d, b_d, c_d, a_rows, a_cols, b_cols);
 
-    cudaMemcpy (c, c_d, sizeof (int) * c_dims, cudaMemcpyDeviceToHost);
+    HANDLE_ERR(cudaMemcpy (c, c_d, sizeof (int) * c_dims, cudaMemcpyDeviceToHost));
 
     int *test_res = (int *) malloc(sizeof(int) * c_dims);
 
+    // Make sure parallel and sequential implementation same (for testing)
     mat_mult(a, b, test_res, a_rows, a_cols, b_cols);
     for (int i = 0; i < a_rows; i++) {
         for (int j = 0; j < b_cols; j++){

@@ -51,10 +51,13 @@ __global__ void mat_vec_mult_fixed_dims(int *mat, int *vec, int *res) {
                 }
                 __syncthreads();
             }
-            row_total += smem[0];
+            // Only 1 thread needs to do this
+            if (threadIdx.x == 0)
+                row_total += smem[threadIdx.x];
         }
-        // Load into ans
-        res[row] = row_total;
+        // Load into ans (single thread)
+        if (threadIdx.x == 0)
+            res[row] = row_total;
     }
 }
 

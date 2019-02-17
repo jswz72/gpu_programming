@@ -68,6 +68,7 @@ int main (int args, char **argv) {
     cudaDeviceSynchronize();
     printf("new way: %lf\n", wtime() - start);
 
+    // Randomize vecs again
     for (int i = 0; i < 1 << 20; i++) {
         int el = rand() % 100;
         a[i] = el;

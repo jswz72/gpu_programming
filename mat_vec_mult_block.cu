@@ -28,34 +28,22 @@ void mat_vec_mult(int *mat, int *vec, int *res, int num_rows, int num_cols)
     }
 }
 
-// Parllel implementation of matrix x vector - 1 block per row
-__global__ void mat_mult_kernel(int *mat, int *vec, int *res, int mat_rows, int mat_cols) {
-    /*
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    while (tid < mat_rows) {
-        int res = 0;
-        for (int i = 0; i < mat_cols; i++) {
-            res += a[tid * mat_cols + i] * b[i];
-        }
-        c[tid] = res;
-        tid += blockDim.x * gridDim.x;
-    }
-    */
-
-    // el for each thread, shared per block
-    // 128
-    __shared__ int smem[128]; 
-    // 1024 --> 8 iter of block
-    for (int block_iter = 0; block_iter * gridDim.x < mat_rows; block_iter++) {
-        // 128
-        for (int thread_iter = 0; thread_iter * blockDim.x < mat_cols; thread_iter++) {
-            int row = blockIdx.x * block_iter; //row
-            int col = threadIdx.x * thread_iter; //col
-            // load mult in shmem accounting for iters
+// Parallel implementation of matrix x vector - 1 block per row: matrix is 1024 x 512
+__global__ void mat_vec_mult_fixed_dims(int *mat, int *vec, int *res) {
+    int mat_rows = 1024;
+    int mat_cols = 512;
+    // El for each thread, shared per block
+    __shared__ int smem[128];
+    for (int block_i = 0; block_i * gridDim.x < mat_rows; block_i++) {
+        int row = blockIdx.x + (block_i * gridDim.x);
+        int row_total = 0;
+        for (int thread_i = 0; thread_i * blockDim.x < mat_cols; thread_i++) {
+            int col = threadIdx.x + (thread_i * blockDim.x);
+            // Load mult in shmem
             smem[threadIdx.x] = mat[row * mat_cols + col] * vec[col];
             __syncthreads();
 
-            // parallel reduction
+            // Parallel reduction
             for (int i = blockDim.x / 2; i > 0; i /= 2) {
                 if (threadIdx.x < i) {
                     int temp = smem[threadIdx.x] + smem[threadIdx.x + i];
@@ -63,9 +51,10 @@ __global__ void mat_mult_kernel(int *mat, int *vec, int *res, int mat_rows, int 
                 }
                 __syncthreads();
             }
-            // Load into ans
-            res[row] = smem[0];
+            row_total += smem[0];
         }
+        // Load into ans
+        res[row] = row_total;
     }
 }
 
@@ -80,9 +69,19 @@ int main (int args, char **argv) {
     srand(time(NULL));
     // Initialize matrix
     cout << "Matrix (a): " << num_rows << " x " << num_cols << endl;
+    for (int i = 0; i < num_rows; i++) {
+        for (int j = 0; j < num_cols; j++) {
+            int el = rand() % 10;
+            a[i * num_cols + j] = el;
+        }
+    }
 
     // Initialize vector
-    cout << "Vector (b): " << num_cols << " x 1 " << endl;
+    cout << "Vector (b): " << num_cols << " x 1" << endl;
+    for (int i = 0; i < num_cols; i++) {
+        int el = rand() % 5;
+        b[i] = el;
+    }
 
     int *a_d, *b_d, *c_d;
     HANDLE_ERR(cudaMalloc((void **) &a_d, sizeof (int) * num_rows * num_cols));
@@ -91,17 +90,18 @@ int main (int args, char **argv) {
 
     HANDLE_ERR(cudaMemcpy (a_d, a, sizeof (int) * num_rows * num_cols, cudaMemcpyHostToDevice));
     HANDLE_ERR(cudaMemcpy (b_d, b, sizeof (int) * num_cols, cudaMemcpyHostToDevice));
-    mat_mult_kernel <<< 128, 128 >>> (a_d, b_d, c_d, num_rows, num_cols);
+    mat_vec_mult_fixed_dims <<< 128, 128 >>> (a_d, b_d, c_d);
 
-    cudaDeviceSynchronize();
     HANDLE_ERR(cudaMemcpy (c, c_d, sizeof (int) * num_rows, cudaMemcpyDeviceToHost));
 
     //Make sure parallel work is equal to sequential work (for testing)
     int *test_res = new int[num_rows];
     mat_vec_mult(a, b, test_res, num_rows, num_cols);
     for (int i = 0; i < num_rows; i++) {
-        if (c[i] != test_res[i])
-            cout << "wrong" << endl;
+        if (c[i] != test_res[i]) {
+            cout << "Not Equal: " << "Parallel work " << c[i] 
+                << ", Sequential Work: " << test_res[i] << endl;
+        }
         assert(c[i] == test_res[i]);
     }
 }

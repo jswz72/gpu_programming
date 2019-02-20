@@ -45,9 +45,10 @@ __global__ void mat_mult_fixed_dims_kernel(int *mat_a, int *mat_b, int *res) {
     for (int row_block = 0; row_block * gridDim.x < A_ROWS; row_block++) {
 
         int a_row = blockIdx.x + (row_block * gridDim.x);
-        for (int col_block = 0; col_block * gridDim.x < B_COLS; col_block++) {
+        for (int b_col = 0; b_col < B_COLS; b_col++) {
 
-            int b_col = blockIdx.x + (col_block * gridDim.x);
+            //int b_col = col_block + (blockIdx.x * gridDim.x);
+            //int b_col = blockIdx.x + (col_block * gridDim.x);
             int total = 0;
             for (int thread_i = 0; thread_i * blockDim.x < A_COLS; thread_i++) {
 

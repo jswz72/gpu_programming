@@ -1,6 +1,6 @@
 /**
   Jacob Sword
-  Parallelized multiplication of matrix and vector of random values given matrix dimensions
+  Parallelized multiplication of matrix and matrix of random values given matrix dimensions
 **/
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,7 +12,6 @@
 
 using std::cout;
 using std::endl;
-
 const int A_ROWS = 256;
 const int A_COLS = 240;
 
@@ -122,7 +121,8 @@ int main (int args, char **argv) {
         for (int j = 0; j < C_COLS; j++){
             int idx = i * C_COLS + j;
             if (c[idx] != test_res[idx]) {
-                cout << "Not Equal at idx: " << i << ", " << j << " Parallel work " << c[idx] << ", Sequential Work: " << test_res[idx] << endl;
+                cout << "Not Equal at idx: " << i << ", " << j 
+                    << " Parallel work " << c[idx] << ", Sequential Work: " << test_res[idx] << endl;
             }
             assert(c[idx] == test_res[idx]);
         }

@@ -23,6 +23,7 @@ const int C_ROWS = A_ROWS;
 const int C_COLS = B_COLS;
 
 
+//Sequential mat_mult for testing
 void mat_mult(int *mat_a, int *mat_b, int *result, int a_rows, int a_cols, int b_cols)
 {
     for (int i = 0; i < a_rows; i++) {
@@ -36,9 +37,10 @@ void mat_mult(int *mat_a, int *mat_b, int *result, int a_rows, int a_cols, int b
     }
 }
 
-// Parallel implementation of matrix x matrix - 1 block per row
-// matrix A is 256 x 240, matrix b is 240 * 512
-// resultant matrix is 256 rows x 512 cols
+/*Parallel implementation of matrix x matrix - 1 block per row
+ * matrix A is 256 x 240, matrix b is 240 * 512
+ * resultant matrix is 256 rows x 512 cols
+ */
 __global__ void mat_mult_fixed_dims_kernel(int *mat_a, int *mat_b, int *res) {
     // El for each thread, shared per block
     __shared__ int smem[128];
@@ -47,13 +49,15 @@ __global__ void mat_mult_fixed_dims_kernel(int *mat_a, int *mat_b, int *res) {
         int a_row = blockIdx.x + (row_block * gridDim.x);
         for (int b_col = 0; b_col < B_COLS; b_col++) {
 
-            //int b_col = col_block + (blockIdx.x * gridDim.x);
-            //int b_col = blockIdx.x + (col_block * gridDim.x);
             int total = 0;
             for (int thread_i = 0; thread_i * blockDim.x < A_COLS; thread_i++) {
 
                 int thread_col = threadIdx.x + (thread_i * blockDim.x);
-                smem[threadIdx.x] = mat_a[a_row * A_COLS + thread_col] * mat_b[thread_col * B_COLS + b_col];
+                // Need to check because 240 not even multiple of 128
+                if (thread_col >= A_COLS)
+                    smem[threadIdx.x] = 0;
+                else
+                    smem[threadIdx.x] = mat_a[a_row * A_COLS + thread_col] * mat_b[thread_col * B_COLS + b_col];
                 __syncthreads();
 
                 //Parallel reduction
@@ -66,41 +70,13 @@ __global__ void mat_mult_fixed_dims_kernel(int *mat_a, int *mat_b, int *res) {
                 }
                 if (threadIdx.x == 0) {
                     total += smem[threadIdx.x];
-                    //printf("\t%d\n", total);
                 }
             }
             if (threadIdx.x == 0) {
-                //printf("%d\n", total);
-                printf("f%d, %df\n", a_row, b_col);
-                res[a_row * B_COLS + b_col] = total;
+                res[a_row * C_COLS + b_col] = total;
             }
         }
     }
-    /*for (int block_i = 0; block_i * gridDim.x < mat_rows; block_i++) {
-        int row = blockIdx.x + (block_i * gridDim.x);
-        int row_total = 0;
-        for (int thread_i = 0; thread_i * blockDim.x < mat_cols; thread_i++) {
-            int col = threadIdx.x + (thread_i * blockDim.x);
-            // Load mult in shmem
-            smem[threadIdx.x] = mat[row * mat_cols + col] * vec[col];
-            __syncthreads();
-
-            // Parallel reduction
-            for (int i = blockDim.x / 2; i > 0; i /= 2) {
-                if (threadIdx.x < i) {
-                    int temp = smem[threadIdx.x] + smem[threadIdx.x + i];
-                    smem[threadIdx.x] = temp;
-                }
-                __syncthreads();
-            }
-            // Only 1 thread needs to do this
-            if (threadIdx.x == 0)
-                row_total += smem[threadIdx.x];
-        }
-        // Load into ans (single thread)
-        if (threadIdx.x == 0)
-            res[row] = row_total;
-    }*/
 }
 
 int main (int args, char **argv) {
@@ -145,13 +121,10 @@ int main (int args, char **argv) {
     for (int i = 0; i < C_ROWS; i++) {
         for (int j = 0; j < C_COLS; j++){
             int idx = i * C_COLS + j;
-            cout << c[idx] << ", " << test_res[idx] << endl;
             if (c[idx] != test_res[idx]) {
                 cout << "Not Equal at idx: " << i << ", " << j << " Parallel work " << c[idx] << ", Sequential Work: " << test_res[idx] << endl;
             }
-            //assert(c[idx] == test_res[idx]);
-            if (j == 4) break;
+            assert(c[idx] == test_res[idx]);
         }
-        if (i == 1) break;
     }
 }

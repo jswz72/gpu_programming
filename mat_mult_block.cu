@@ -8,6 +8,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <time.h>
+#include "wtime.h"
 #include "./error_handler.h"
 
 using std::cout;
@@ -109,7 +110,12 @@ int main (int args, char **argv) {
 
     HANDLE_ERR(cudaMemcpy (a_d, a, sizeof (int) * A_ROWS * A_COLS, cudaMemcpyHostToDevice));
     HANDLE_ERR(cudaMemcpy (b_d, b, sizeof (int) * B_ROWS * B_COLS, cudaMemcpyHostToDevice));
+
+    double starttime = wtime();
     mat_mult_fixed_dims_kernel <<< 128, 128 >>> (a_d, b_d, c_d);
+    cudaDeviceSynchronize();
+    double algotime = wtime() - starttime;
+    cout << "Multiplication time: " << algotime << endl;
 
     HANDLE_ERR(cudaMemcpy (c, c_d, sizeof (int) * C_ROWS * C_COLS, cudaMemcpyDeviceToHost));
 

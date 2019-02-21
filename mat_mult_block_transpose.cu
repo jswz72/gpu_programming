@@ -41,13 +41,15 @@ void mat_mult(int *mat_a, int *mat_b, int *result, int a_rows, int a_cols, int b
  * matrix A is 256 x 240, matrix b is 240 * 512
  * resultant matrix is 256 rows x 512 cols
  */
-__global__ void mat_mult_fixed_dims_kernel(int *mat_a, int *mat_b, int *res) {
+__global__ void mat_mult_fixed_dims_trans_kernel(int *mat_a, int *mat_b, int *res) {
+    int B_TRANS_ROWS = B_COLS;
+    int B_TRANS_COLS = B_ROWS;
     // El for each thread, shared per block
     __shared__ int smem[128];
     for (int row_block = 0; row_block * gridDim.x < A_ROWS; row_block++) {
 
         int a_row = blockIdx.x + (row_block * gridDim.x);
-        for (int b_col = 0; b_col < B_COLS; b_col++) {
+        for (int b_row = 0; b_row < B_TRANS_ROWS; b_row++) {
 
             int total = 0;
             for (int thread_i = 0; thread_i * blockDim.x < A_COLS; thread_i++) {
@@ -57,7 +59,7 @@ __global__ void mat_mult_fixed_dims_kernel(int *mat_a, int *mat_b, int *res) {
                 if (thread_col >= A_COLS)
                     smem[threadIdx.x] = 0;
                 else
-                    smem[threadIdx.x] = mat_a[a_row * A_COLS + thread_col] * mat_b[thread_col * B_COLS + b_col];
+                    smem[threadIdx.x] = mat_a[a_row * A_COLS + thread_col] * mat_b[b_row * B_TRANS_COLS + thread_col];
                 __syncthreads();
 
                 //Parallel reduction
@@ -73,7 +75,7 @@ __global__ void mat_mult_fixed_dims_kernel(int *mat_a, int *mat_b, int *res) {
                 }
             }
             if (threadIdx.x == 0) {
-                res[a_row * C_COLS + b_col] = total;
+                res[a_row * C_COLS + b_row] = total;
             }
         }
     }
@@ -82,6 +84,7 @@ __global__ void mat_mult_fixed_dims_kernel(int *mat_a, int *mat_b, int *res) {
 int main (int args, char **argv) {
     int *a = (int *) malloc(sizeof(int) * A_ROWS * A_COLS);
     int *b = (int *) malloc(sizeof(int) * B_ROWS * B_COLS);
+    int *trans = (int *) malloc(sizeof(int) * B_ROWS * B_COLS);
     int *c = (int *) malloc(sizeof(int) * C_ROWS * C_COLS);
 
     srand(time(NULL));
@@ -103,16 +106,23 @@ int main (int args, char **argv) {
         }
     }
 
+    // Transpose matrix b
+    for (int i = 0; i < B_ROWS; i++) {
+        for (int j = 0; j < B_COLS; j++) {
+            trans[j * B_ROWS + i] = b[i * B_COLS + j];
+        }
+    }
+
     int *a_d, *b_d, *c_d;
     HANDLE_ERR(cudaMalloc((void **) &a_d, sizeof (int) * A_ROWS * A_COLS));
     HANDLE_ERR(cudaMalloc((void **) &b_d, sizeof (int) * B_ROWS * B_COLS));
     HANDLE_ERR(cudaMalloc((void **) &c_d, sizeof (int) * C_ROWS * C_COLS));
 
     HANDLE_ERR(cudaMemcpy (a_d, a, sizeof (int) * A_ROWS * A_COLS, cudaMemcpyHostToDevice));
-    HANDLE_ERR(cudaMemcpy (b_d, b, sizeof (int) * B_ROWS * B_COLS, cudaMemcpyHostToDevice));
+    HANDLE_ERR(cudaMemcpy (b_d, trans, sizeof (int) * B_ROWS * B_COLS, cudaMemcpyHostToDevice));
 
     double starttime = wtime();
-    mat_mult_fixed_dims_kernel <<< 128, 128 >>> (a_d, b_d, c_d);
+    mat_mult_fixed_dims_trans_kernel <<< 128, 128 >>> (a_d, b_d, c_d);
     cudaDeviceSynchronize();
     double algotime = wtime() - starttime;
     cout << "Multiplication time: " << algotime << endl;

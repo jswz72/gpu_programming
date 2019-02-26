@@ -38,32 +38,12 @@ __global__ void mat_transpose_kernel(int *mat, int *res) {
            local_block_start = (tile_dim * tile_dim * 32) + blockIdx.x * 32;
        }
        int block_start = local_block_start + (block_iter * (tile_dim * tile_dim * 64));
-       if (threadIdx.x < tile_dim) {
-           local_thread_idx = threadIdx.x;
-       } else {
-           local_thread_idx = ((threadIdx.x / tile_dim) * 32) + (threadIdx.x % tile_dim)
-
-       int block_start = (blockIdx.x * tile_dim);
-       if (block_start >= 32) {
-           block_start += 
+       if (threadIdx.x < 32) {
+           idx = 
        }
-       + (32 * 32 * block_iter);
-   }
 
-   int local_tid = threadIdx.x;
-   if (local_tid > tile_dim) {
-       local_tid += (threadIdx.x / tile_dim) * tile_dim;
-       local_tid += threadIdx % tile_dim;
+       int row = (blockIdx.x % 32) + 
    }
-
-   int block_start = blockIdx.x * tile_dims;
-    if (block_start > tile_dim) {
-       block_start += blockIdx.x / 
-       block_start += threadIdx % tile_dim;
-   }
-   int idx = blockIdx.x * tile_dims + threadIdx.x;
-   if (idx > time_dims) 
-
 }
 
 int main (int args, char **argv) {

@@ -1,6 +1,7 @@
 /**
   Jacob Sword
-  Parallelized multiplication of matrix and vector of random values given matrix dimensions
+  Parallelized matrix tranpose
+  Comparison between naive and coalesced transpose
 **/
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,8 +22,8 @@ __global__ void mat_transpose_coalesced_kernel(int *mat, int *res) {
     int blocks_per_row = 32;
 
     __shared__ int smem[32 * 32];
-    int rows_per_block_iter = 64;
 
+    int rows_per_block_iter = 64;
     // Each iter has 2 "block-rows"
     for (int block_iter = 0; block_iter < 16; block_iter++) {
         int tile_row = blockIdx.x / blocks_per_row;
@@ -51,7 +52,6 @@ __global__ void mat_transpose_regular_kernel(int *mat, int *res) {
     int blocks_per_row = 32;
 
     int rows_per_block_iter = 64;
-
     // Each iter has 2 "block-rows"
     for (int block_iter = 0; block_iter < 16; block_iter++) {
         int tile_row = blockIdx.x / blocks_per_row;
@@ -74,7 +74,6 @@ void fill_matrix(int *mat, int num_rows, int num_cols) {
             mat[i * num_cols + j] = el;
         }
     }
-
 }
 
 int main (int args, char **argv) {
@@ -107,6 +106,7 @@ int main (int args, char **argv) {
             assert(a[i * num_cols + j] == reg_result[j * num_cols + i]);
     }
 
+    // Refill
     fill_matrix(a, num_rows, num_cols);
     HANDLE_ERR(cudaMemcpy (a_d, a, sizeof (int) * num_rows * num_cols, cudaMemcpyHostToDevice));
 

@@ -61,7 +61,8 @@ __global__ void create_edge_list_kernel(double *word_vecs, size_t word_vecs_len,
     }
 };
 
-double *parse_word_vectors(const char *vecfilename, int limit, int dims, size_t *word_size) {
+double *parse_word_vectors(const char *vecfilename, int limit, int dims, size_t *word_size,
+        std::vector<string> &word_map) {
     std::ifstream infile(vecfilename);
     string line;
     int i = 0;
@@ -73,7 +74,6 @@ double *parse_word_vectors(const char *vecfilename, int limit, int dims, size_t 
     infile.clear();
     infile.seekg(0, std::ios::beg);
 
-	std::ofstream outfile(woname);
     int row = 0;
 
     //only read until limit lines
@@ -95,8 +95,6 @@ double *parse_word_vectors(const char *vecfilename, int limit, int dims, size_t 
         }
         if (!alphanum)
             continue;
-        // Write to word-order
-        outfile << word << endl;
 
         int base = row * 51;
         words[base] = row;
@@ -106,22 +104,37 @@ double *parse_word_vectors(const char *vecfilename, int limit, int dims, size_t 
             words[base + d_i] = d;
             d_i++;
         }
+        word_map.push_back(word);
         row++;
     }
+    printf("ws: %d\n", word_map.size());
     *word_size = row;
     return words;
 }
 
-int write_edge_list(double *edge_list, size_t size) {
+int write_edge_list(double *edge_list, size_t size, std::vector<string> &word_map) {
 	std::ofstream outfile(ofname);
+    std::ofstream word_order(woname);
+    std::unordered_map<int, int> word_mapping;
     int counter = 0;
+
 	for (unsigned int i = 0; i < size; i++) {
         int base = i * 3;
         if (edge_list[base] == -1)
             continue;
-		outfile << edge_list[base] << " " 
-			<< edge_list[base + 1] << " " << edge_list[base + 2] << endl;
-        counter++;
+        int vtx1 = edge_list[base];
+        int vtx2 = edge_list[base + 1];
+        double weight = edge_list[base + 2];
+        if (word_mapping.find(vtx1) == word_mapping.end()) {
+            word_mapping[vtx1] = counter++;
+			word_order << word_map[vtx1] << endl;
+        }
+        if (word_mapping.find(vtx2) == word_mapping.end()) {
+			word_mapping[vtx2] = counter++;
+			word_order << word_map[vtx2] << endl;
+		}
+        outfile << word_mapping[vtx1] << " " << word_mapping[vtx2] << " " << weight << "\n";
+
 	}
     return counter;
 }
@@ -139,8 +152,11 @@ int main(int argc, char *argv[]) {
     const int limit = argc > 4 ? atoi(argv[4]) : 0;
 	const int to_nums = argc > 5 ? atoi(argv[5]) : 0;
 
+    std::vector<string> word_map;
+
     size_t word_size;
-    double *words = parse_word_vectors(vecfilename, limit, 50, &word_size);
+    double *words = parse_word_vectors(vecfilename, limit, 50, &word_size, word_map);
+    printf("word-map: %d", word_map.size());
     
     size_t edge_list_size = word_size * word_size;
 
@@ -161,7 +177,7 @@ int main(int argc, char *argv[]) {
 	double *edge_list = (double *)malloc(sizeof(double) * 3 * edge_list_size);
     HANDLE_ERR(cudaMemcpy(edge_list, edge_list_d, sizeof(double) * 3 * edge_list_size, cudaMemcpyDeviceToHost));
 
-    int num_edges = write_edge_list(edge_list, edge_list_size);
+    int num_edges = write_edge_list(edge_list, edge_list_size, word_map);
 
     cout << "Num edges: " << num_edges << endl;
     cout << "Time: " << endtime << endl;

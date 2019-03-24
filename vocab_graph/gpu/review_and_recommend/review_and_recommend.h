@@ -1,13 +1,11 @@
+#include <limits>
 #include "graph.h"
-#ifndef ReviewAndRec
-#define ReviewAndRec
+
 struct WordDist {
     double dist;
     int word_id;
-    WordDist(double dist, int id): dist(dist), word_id(id) {};
+    __device__ WordDist(double dist, int id): dist(dist), word_id(id) {};
 };
-const double DOUBLE_MAX = std::numeric_limits<double>::max();
-const double DOUBLE_INF = std::numeric_limits<double>::infinity();
 
 typedef graph<long, long, double, long, long, double> CSR;
 
@@ -16,12 +14,11 @@ typedef graph<long, long, double, long, long, double> CSR;
  * Recommend new words to learn based of their collective closeness
  * to aready known words
  */
-std::vector<WordDist*> recommend(CSR *csr, std::vector<int> &source_words, int num_recs);
-
+__global__ void recommend_kernel (int *beg_pos, int *adj_list, double *weight, int *source_words, int num_source_words,
+        int vert_count, WordDist **closest_words, int *num_recs);
 /**
  * Given list of reviewed words, learned words, graph, and number of words to recommend to review,
  * Return order to review learned words based on collctive closeness
  * to already reviewed words
  */
 std::vector<int> review (CSR *csr, std::vector<int> &reviewed, std::vector<int> &learned, int rec_count);
-#endif

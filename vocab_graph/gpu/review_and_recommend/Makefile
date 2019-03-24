@@ -1,23 +1,13 @@
-cc = "$(shell which g++)" 
-flags = -I. -fopenmp -march=athlon64 -O3
-flags += -std=c++11
+default: recommend_source review_and_recommend_source recommend
 
-ifeq ($(debug), 1)
-	flags+= -DDEBUG 
-endif
+review_and_recommend_source:
+	nvcc -std=c++11 -lineinfo -c review_and_recommend.cu
 
-objs = $(patsubst %.cpp,%.o,$(wildcard ../../lib/*.cpp)) \
-			$(patsubst %.cpp,%.o,$(wildcard *.cpp))
-
-dep=review_and_recommend.cpp utils.cpp
-
-default: review recommend
-
-review:
-	$(cc) review.cpp ${dep} $(flags) -o review.bin
+recommend_source:
+	nvcc -std=c++11 -lineinfo -c recommend.cu
 
 recommend:
-	$(cc) recommend.cpp ${dep} $(flags) -o recommend.bin
+	nvcc -o recommend.bin recommend.o review_and_recommend.o 
 
-clean:
-	rm -rf $(exe) $(objs) 
+
+

@@ -14,8 +14,8 @@ typedef graph<long, long, double, long, long, double> CSR;
  * Recommend new words to learn based of their collective closeness
  * to aready known words
  */
-__global__ void recommend_kernel (int *beg_pos, int *adj_list, double *weight, int *source_words, int num_source_words,
-        int vert_count, WordDist **closest_words, int *num_recs);
+__global__ void recommend_kernel (long *beg_pos, long *adj_list, double *weight, int *source_words, int num_source_words,
+        int vert_count, double *dists, int *word_ids, int *num_recs);
 /**
  * Given list of reviewed words, learned words, graph, and number of words to recommend to review,
  * Return order to review learned words based on collctive closeness

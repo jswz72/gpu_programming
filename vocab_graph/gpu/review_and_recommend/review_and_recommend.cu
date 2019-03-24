@@ -27,10 +27,10 @@ __device__ double get_collective_dist(double *dist, int rows, int cols, int col)
     return sum;
 }
 
-__device__ int min_dist(double *distances, unsigned int *path, int vert_count)
+__device__ long min_dist(double *distances, unsigned int *path, int vert_count)
 {
     double min = DOUBLE_MAX;
-    int min_idx;
+    long min_idx;
     for (int i = 0; i < vert_count; i++)
     {
         if (!path[i] && distances[i] <= min)
@@ -45,10 +45,8 @@ __device__ int min_dist(double *distances, unsigned int *path, int vert_count)
 /**
  * Find shortest weighted path to all nodes from source using djikstra's algorithm
  */
-__device__ double *shortest_path_weights(int *beg_pos, int *adj_list, double *weight, int vert_count, int source)
+__device__ double *shortest_path_weights(long *beg_pos, long *adj_list, double *weight, int vert_count, int source)
 {
-    printf("vc: %d\n", vert_count);
-    printf("s: %d\n", source);
     // distance from start to vertex 
     double *distances = new double[vert_count];
     // bitset true if included in path
@@ -62,12 +60,10 @@ __device__ double *shortest_path_weights(int *beg_pos, int *adj_list, double *we
     distances[source] = 0;
     for (int count = 0; count < vert_count - 1; count++)
     {
-        int cur = min_dist(distances, path, vert_count);
+        long cur = min_dist(distances, path, vert_count);
         path[cur] = true;
 
         // Update distances
-        if (count < 5)
-            printf("bg: %d, bg: %d\n", beg_pos[cur], beg_pos[cur+1]);
         for (int i = beg_pos[cur]; i < beg_pos[cur+1]; i++)
         {
 			int neighbor = adj_list[i];
@@ -82,8 +78,7 @@ __device__ double *shortest_path_weights(int *beg_pos, int *adj_list, double *we
     return distances;
 }
 
-__device__ WordDist** collective_closest(int *source_words, int n, int *beg_pos, int *adj_list, double *weight, int vert_count) {
-    printf("yes2\n");
+__device__ WordDist** collective_closest(int *source_words, int n, long *beg_pos, long *adj_list, double *weight, int vert_count) {
     // Row for each source word, col for each vtx
     double *dist = (double *)malloc(sizeof(double) * n * vert_count);
 
@@ -91,14 +86,12 @@ __device__ WordDist** collective_closest(int *source_words, int n, int *beg_pos,
 	WordDist ** word_dist = (WordDist **)malloc(sizeof(WordDist*) * vert_count);
 
     // Fill out dists to all vtxs (dist col) from word (dist row)
-    printf("n: %d\n", n);
     for (int i = 0; i < n; i++) {
         int cols = vert_count;
         double *shortest_paths = shortest_path_weights(beg_pos, adj_list, weight, vert_count, source_words[i]);
         for (int j = 0; j < cols; j++) {
             dist[i * cols + j] = shortest_paths[j];
         }
-        printf("go tit\n");
     }
 
     // Get collective dist of vtx (col) to all source words (row)
@@ -115,9 +108,8 @@ __device__ WordDist** collective_closest(int *source_words, int n, int *beg_pos,
 	return word_dist;
 }
 
-__global__ void recommend_kernel(int *beg_pos, int *adj_list, double *weight, int *source_words, 
-        int num_source_words, int vert_count, WordDist **closest_words, int *num_recs) {
-    printf("yes");
+__global__ void recommend_kernel(long *beg_pos, long *adj_list, double *weight, int *source_words, 
+        int num_source_words, int vert_count, double *dists, int *words, int *num_recs) {
     WordDist** related_words = collective_closest(source_words, num_source_words, beg_pos, adj_list, weight, vert_count);
 
     // Word has no relation to given set
@@ -127,8 +119,11 @@ __global__ void recommend_kernel(int *beg_pos, int *adj_list, double *weight, in
     // Filter out all dists that are 0 (source word) or not related to any source words
     for (int i = 0; i < vert_count; i++) {
         bool append = related_words[i]->dist != DOUBLE_INF && related_words[i]->dist != no_relation;
-        if (append)
-            closest_words[len++] = related_words[i];
+        if (append) {
+            dists[len] = related_words[i]->dist;
+            words[len] = related_words[i]->word_id;
+            len++;
+        }
     }
     *num_recs = len;
 }

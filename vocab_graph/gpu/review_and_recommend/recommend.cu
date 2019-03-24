@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include "review_and_recommend.h"
 #include "error_handler.h"
+#include "wtime.h"
 
 using std::cout;
 using std::endl;
@@ -57,44 +58,52 @@ int main(int argc, char **argv) {
 		source_word_idxs.push_back(idx);
     }
 
-    int *source_idxs_d, *beg_pos_d, *csr_d;
+    int *source_idxs_d;
+    long *beg_pos_d, *csr_d;
     double *weight_d;
-    WordDist **closest_words_d;
+    double *dists_d;
+    int *word_ids_d;
     int *num_recs_d;
 
     HANDLE_ERR(cudaMalloc((void **) &source_idxs_d, sizeof(int) * source_word_idxs.size()));
-    HANDLE_ERR(cudaMalloc((void **) &beg_pos_d, sizeof(int) * csr->vert_count));
-    HANDLE_ERR(cudaMalloc((void **) &csr_d, sizeof(int) * csr->edge_count));
+    HANDLE_ERR(cudaMalloc((void **) &beg_pos_d, sizeof(long) * csr->vert_count));
+    HANDLE_ERR(cudaMalloc((void **) &csr_d, sizeof(long) * csr->edge_count));
     HANDLE_ERR(cudaMalloc((void **) &weight_d, sizeof(double) * csr->edge_count));
     // Crate closest_words of size num_rec
-    HANDLE_ERR(cudaMalloc((void **) &closest_words_d, sizeof(WordDist*) * num_recs));
+    HANDLE_ERR(cudaMalloc((void **) &dists_d, sizeof(double) * num_recs));
+    HANDLE_ERR(cudaMalloc((void **) &word_ids_d, sizeof(int) * num_recs));
     HANDLE_ERR(cudaMalloc((void **) &num_recs_d, sizeof(int)));
 
     // Copy source word idxs to device arr
     HANDLE_ERR(cudaMemcpy (source_idxs_d, source_word_idxs.data(), sizeof(int) * source_word_idxs.size(), cudaMemcpyHostToDevice));
     // Copy csr beg_pos arry into device arry
-    HANDLE_ERR(cudaMemcpy (beg_pos_d, csr->beg_pos, sizeof(int) * csr->vert_count, cudaMemcpyHostToDevice));
+    HANDLE_ERR(cudaMemcpy (beg_pos_d, csr->beg_pos, sizeof(long) * csr->vert_count, cudaMemcpyHostToDevice));
     // Copy csr csr arry into device arry
-    HANDLE_ERR(cudaMemcpy (csr_d, csr->csr, sizeof(int) * csr->edge_count, cudaMemcpyHostToDevice));
+    HANDLE_ERR(cudaMemcpy (csr_d, csr->csr, sizeof(long) * csr->edge_count, cudaMemcpyHostToDevice));
     // Copy csr weight arry into device arry
     HANDLE_ERR(cudaMemcpy (weight_d, csr->weight, sizeof(double) * csr->edge_count, cudaMemcpyHostToDevice));
     // Modied number of recs depending on size calculated in kernel
     HANDLE_ERR(cudaMemcpy (num_recs_d, &num_recs, sizeof(int), cudaMemcpyHostToDevice));
 
-    recommend_kernel <<< 1, 1 >>> (beg_pos_d, csr_d, weight_d, source_idxs_d, num_source_words, csr->vert_count, closest_words_d, num_recs_d);
+    double starttime = wtime();
+    recommend_kernel <<< 1, 1>>> (beg_pos_d, csr_d, weight_d, source_idxs_d, num_source_words, csr->vert_count, dists_d, word_ids_d, num_recs_d);
     cudaDeviceSynchronize();
+    double endtime = wtime();
     // Copy back closest_words
     HANDLE_ERR(cudaMemcpy (&num_recs, num_recs_d, sizeof(int), cudaMemcpyDeviceToHost));
-    WordDist **closest_words = (WordDist **)malloc(sizeof(WordDist*) * num_recs);
-    HANDLE_ERR(cudaMemcpy (closest_words, closest_words_d, sizeof(WordDist*) * num_recs, cudaMemcpyDeviceToHost));
+    double *dists = (double *)malloc(sizeof(double*) * num_recs);
+    int *ids = (int *)malloc(sizeof(int*) * num_recs);
+    HANDLE_ERR(cudaMemcpy (dists, dists_d, sizeof(double) * num_recs, cudaMemcpyDeviceToHost));
+    HANDLE_ERR(cudaMemcpy (ids, word_ids_d, sizeof(int) * num_recs, cudaMemcpyDeviceToHost));
 
 	cout << "\nLearning recommendations :" << endl;
 	for (int i = 0; i < num_recs; i++) {
-		cout << words[closest_words[i]->word_id] << " (Value: "
-			<< closest_words[i]->dist << ")" << endl;
+		cout << words[ids[i]] << " (Value: "
+			<< dists[i] << ")" << endl;
 	}
     if (num_recs < init_num_recs) {
         cout << "End" << endl;
     }
+    cout << "Algo Time: " << endtime - starttime << endl;
 	return 0;	
 }

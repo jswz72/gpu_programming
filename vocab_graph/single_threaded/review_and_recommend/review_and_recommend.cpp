@@ -43,7 +43,6 @@ int min_dist(double *distances, unsigned int *path, int verticies)
  */
 double *shortest_path_weights(CSR *csr, int source)
 {
-    printf("s: %d\n", source);
     int verticies = csr->vert_count;
     // distance from start to vertex 
     double *distances = new double[verticies];
@@ -62,8 +61,6 @@ double *shortest_path_weights(CSR *csr, int source)
         path[cur] = true;
 
         // Update distances
-        if (count < 5)
-            printf("bg: %d, bg: %d\n", csr->beg_pos[cur], csr->beg_pos[cur+1]);
         for (int i = csr->beg_pos[cur]; i < csr->beg_pos[cur+1]; i++)
         {
 			int neighbor = csr->csr[i];

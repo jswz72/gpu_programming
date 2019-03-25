@@ -78,54 +78,44 @@ __device__ double *shortest_path_weights(long *beg_pos, long *adj_list, double *
     return distances;
 }
 
-__device__ WordDist** collective_closest(int *source_words, int n, long *beg_pos, long *adj_list, double *weight, int vert_count) {
+__global__ void shortest_paths_kernel(int *source_words, int n, long *beg_pos, long *adj_list, double *weight, int vert_count, double *dist) {
     // Row for each source word, col for each vtx
-    double *dist = (double *)malloc(sizeof(double) * n * vert_count);
-
     // All vtxs, sorted in terms of closest
-	WordDist ** word_dist = (WordDist **)malloc(sizeof(WordDist*) * vert_count);
 
     // Fill out dists to all vtxs (dist col) from word (dist row)
-    for (int i = 0; i < n; i++) {
+
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    while (tid < n) {
         int cols = vert_count;
-        double *shortest_paths = shortest_path_weights(beg_pos, adj_list, weight, vert_count, source_words[i]);
+        double *shortest_paths = shortest_path_weights(beg_pos, adj_list, weight, vert_count, source_words[tid]);
+        printf("Finished shortest path\n");
         for (int j = 0; j < cols; j++) {
-            dist[i * cols + j] = shortest_paths[j];
+            dist[tid * cols + j] = shortest_paths[j];
         }
+        tid += blockDim.x * gridDim.x;
     }
-
-    // Get collective dist of vtx (col) to all source words (row)
-    for (int i = 0; i < vert_count; i++) {
-        WordDist *wd = new WordDist(get_collective_dist(dist, n, vert_count, i), i);
-        word_dist[i] = wd;
-    }
-    // Sort in terms of collect closest
-	thrust::sort(word_dist, word_dist + vert_count, [](WordDist *a, WordDist *b) -> bool
-    {
-        return a->dist > b->dist;
-    });
-
-	return word_dist;
 }
 
-__global__ void recommend_kernel(long *beg_pos, long *adj_list, double *weight, int *source_words, 
-        int num_source_words, int vert_count, double *dists, int *words, int *num_recs) {
-    WordDist** related_words = collective_closest(source_words, num_source_words, beg_pos, adj_list, weight, vert_count);
+__global__ void collective_closest_kernel(double *dist, int num_source_words, int vert_count, int *word_ids, double *dists) {
 
     // Word has no relation to given set
     double no_relation = (1 / DOUBLE_MAX) * num_source_words;
-	
-    int len = 0;
-    // Filter out all dists that are 0 (source word) or not related to any source words
-    for (int i = 0; i < vert_count; i++) {
-        bool append = related_words[i]->dist != DOUBLE_INF && related_words[i]->dist != no_relation;
+
+    // Get collective dist of vtx (col) to all source words (row)
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    while (tid < vert_count) {
+        double my_dist = get_collective_dist(dist, num_source_words, vert_count, tid);
+        bool append = my_dist != DOUBLE_INF && my_dist != no_relation;
         if (append) {
-            dists[len] = related_words[i]->dist;
-            words[len] = related_words[i]->word_id;
-            len++;
+            word_ids[tid] = tid;
+            dists[tid] = my_dist;
         }
+        else {
+            word_ids[tid] = -1;
+            dists[tid] = -1;
+        }
+        tid += blockDim.x * gridDim.x;
     }
-    *num_recs = len;
 }
 
 /*std::vector<int> review (CSR *csr, std::vector<int> &reviewed, std::vector<int> &learned, int rev_count) {

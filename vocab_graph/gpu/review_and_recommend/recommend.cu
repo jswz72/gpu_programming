@@ -67,19 +67,19 @@ int main(int argc, char **argv) {
     double *dist_d;
 
     HANDLE_ERR(cudaMalloc((void **) &source_idxs_d, sizeof(int) * source_word_idxs.size()));
-    HANDLE_ERR(cudaMalloc((void **) &beg_pos_d, sizeof(long) * csr->vert_count));
+    HANDLE_ERR(cudaMalloc((void **) &beg_pos_d, sizeof(long) * (csr->vert_count + 1)));
     HANDLE_ERR(cudaMalloc((void **) &csr_d, sizeof(long) * csr->edge_count));
     HANDLE_ERR(cudaMalloc((void **) &weight_d, sizeof(double) * csr->edge_count));
     // Crate closest_words of size num_rec
-    HANDLE_ERR(cudaMalloc((void **) &dists_d, sizeof(double) * num_recs));
-    HANDLE_ERR(cudaMalloc((void **) &word_ids_d, sizeof(int) * num_recs));
+    HANDLE_ERR(cudaMalloc((void **) &dists_d, sizeof(double) * csr->vert_count));
+    HANDLE_ERR(cudaMalloc((void **) &word_ids_d, sizeof(int) * csr->vert_count));
     HANDLE_ERR(cudaMalloc((void **) &num_recs_d, sizeof(int)));
     HANDLE_ERR(cudaMalloc((void **) &dist_d, sizeof(double) * csr->vert_count * num_source_words));
 
     // Copy source word idxs to device arr
     HANDLE_ERR(cudaMemcpy (source_idxs_d, source_word_idxs.data(), sizeof(int) * source_word_idxs.size(), cudaMemcpyHostToDevice));
     // Copy csr beg_pos arry into device arry
-    HANDLE_ERR(cudaMemcpy (beg_pos_d, csr->beg_pos, sizeof(long) * csr->vert_count, cudaMemcpyHostToDevice));
+    HANDLE_ERR(cudaMemcpy (beg_pos_d, csr->beg_pos, sizeof(long) * (csr->vert_count + 1), cudaMemcpyHostToDevice));
     // Copy csr csr arry into device arry
     HANDLE_ERR(cudaMemcpy (csr_d, csr->csr, sizeof(long) * csr->edge_count, cudaMemcpyHostToDevice));
     // Copy csr weight arry into device arry
@@ -88,9 +88,8 @@ int main(int argc, char **argv) {
     HANDLE_ERR(cudaMemcpy (num_recs_d, &num_recs, sizeof(int), cudaMemcpyHostToDevice));
 
     double starttime = wtime();
-    shortest_paths_kernel <<< 128, 128 >>> (source_idxs_d, num_source_words, beg_pos_d, csr_d, weight_d, csr->vert_count, dist_d);
+    shortest_paths_kernel <<< 1, 1 >>> (source_idxs_d, num_source_words, beg_pos_d, csr_d, weight_d, csr->vert_count, dist_d);
     cudaDeviceSynchronize();
-    printf("Finished!\n");
     collective_closest_kernel <<< 128, 128 >>> (dist_d, num_source_words, csr->vert_count, word_ids_d, dists_d);
     cudaDeviceSynchronize();
     double endtime = wtime();
@@ -102,9 +101,9 @@ int main(int argc, char **argv) {
     HANDLE_ERR(cudaMemcpy (ids, word_ids_d, sizeof(int) * csr->vert_count, cudaMemcpyDeviceToHost));
 
     WordDist **wd = (WordDist**)malloc(sizeof(WordDist*) * csr->vert_count);
+    printf("yes\n");
     for (int i = 0; i < csr->vert_count; i++) {
-        wd[i]->word_id = ids[i];
-        wd[i]->dist = dists[i];
+        wd[i] = new WordDist(dists[i], ids[i]);
     }
 
     // Sort in terms of collect closest
@@ -113,7 +112,6 @@ int main(int argc, char **argv) {
         return a->dist > b->dist;
     });
 
-    
 	cout << "\nLearning recommendations :" << endl;
 	for (int i = 0; i < num_recs; i++) {
         if (wd[i]->word_id == -1) {

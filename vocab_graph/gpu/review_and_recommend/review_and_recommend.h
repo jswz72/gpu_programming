@@ -4,7 +4,7 @@
 struct WordDist {
     double dist;
     int word_id;
-    __device__ WordDist(double dist, int id): dist(dist), word_id(id) {};
+    WordDist(double dist, int id): dist(dist), word_id(id) {};
 };
 
 typedef graph<long, long, double, long, long, double> CSR;

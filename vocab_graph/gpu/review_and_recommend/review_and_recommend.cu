@@ -64,6 +64,9 @@ __device__ double *shortest_path_weights(long *beg_pos, long *adj_list, double *
         path[cur] = true;
 
         // Update distances
+        printf("%ld, %ld\n", beg_pos[cur], beg_pos[cur+1]);
+        if (beg_pos[cur+1] == 0)
+            printf("DEBUG: c: %d, c1:%d\n", cur, cur+1);
         for (int i = beg_pos[cur]; i < beg_pos[cur+1]; i++)
         {
 			int neighbor = adj_list[i];
@@ -79,21 +82,24 @@ __device__ double *shortest_path_weights(long *beg_pos, long *adj_list, double *
 }
 
 __global__ void shortest_paths_kernel(int *source_words, int n, long *beg_pos, long *adj_list, double *weight, int vert_count, double *dist) {
+    printf("Starting sssp\n");
     // Row for each source word, col for each vtx
     // All vtxs, sorted in terms of closest
 
     // Fill out dists to all vtxs (dist col) from word (dist row)
 
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    while (tid < n) {
+    //int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    //while (tid < n) {
+    for (int tid = 0; tid < n; tid++) {
         int cols = vert_count;
         double *shortest_paths = shortest_path_weights(beg_pos, adj_list, weight, vert_count, source_words[tid]);
-        printf("Finished shortest path\n");
+        printf("Fin\n");
         for (int j = 0; j < cols; j++) {
             dist[tid * cols + j] = shortest_paths[j];
         }
-        tid += blockDim.x * gridDim.x;
+        //tid += blockDim.x * gridDim.x;
     }
+    printf("Done with sssps\n");
 }
 
 __global__ void collective_closest_kernel(double *dist, int num_source_words, int vert_count, int *word_ids, double *dists) {
@@ -116,6 +122,7 @@ __global__ void collective_closest_kernel(double *dist, int num_source_words, in
         }
         tid += blockDim.x * gridDim.x;
     }
+    //printf("Done with collective closest\n");
 }
 
 /*std::vector<int> review (CSR *csr, std::vector<int> &reviewed, std::vector<int> &learned, int rev_count) {

@@ -14,7 +14,7 @@ using std::endl;
 using std::string;
 
 struct WordDist {
-    double dist;
+    int dist;
     int word_id;
     WordDist(double dist, int id): dist(dist), word_id(id) {};
 };
@@ -34,17 +34,17 @@ __device__ double DOUBLE_MAX = std::numeric_limits<double>::max();
 __device__ double DOUBLE_INF = std::numeric_limits<double>::infinity();
 
 // Inverse sum rule, closness of vtx to all sources
-__device__ double get_collective_dist(double *dist, int rows, int cols, int col) {
+__device__ int get_collective_dist(int *dist, int rows, int cols, int col) {
     double sum = 0;
     for (int i = 0; i < rows; i++) {
-        sum += (1 / dist[i * cols + col]);
+        sum += 1.0 / (double)dist[i * cols + col];
     }
     return sum;
 }
 
-__device__ long min_dist(double *distances, unsigned int *path, int vert_count)
+__device__ long min_dist(int *distances, unsigned int *path, int vert_count)
 {
-    double min = DOUBLE_MAX;
+    int min = INT_MAX;
     long min_idx;
     for (int i = 0; i < vert_count; i++)
     {
@@ -60,13 +60,13 @@ __device__ long min_dist(double *distances, unsigned int *path, int vert_count)
 /**
  * Find shortest weighted path to all nodes from source using djikstra's algorithm
  */
-__global__ void shortest_path_weights_kernel(long *beg_pos, long *adj_list, double *weight, int vert_count, int source, double *distances)
+__global__ void shortest_path_weights_kernel(long *beg_pos, long *adj_list, int *weight, int vert_count, int source, int *distances)
 {
     // bitset true if included in path
     unsigned int *path = new unsigned int[vert_count];
     for (int i = 0; i < vert_count; i++)
     {
-        distances[i] = DOUBLE_MAX;
+        distances[i] = INT_MAX;
         path[i] = 0;
     }
 
@@ -81,21 +81,21 @@ __global__ void shortest_path_weights_kernel(long *beg_pos, long *adj_list, doub
         {
 			int neighbor = adj_list[i];
             if (!path[neighbor] && 
-                    distances[cur] != DOUBLE_MAX &&
+                    distances[cur] != INT_MAX &&
                      distances[cur] + weight[i] < distances[neighbor])
             {
-                double to_write = distances[cur] + weight[i];
-                distances[neighbor] = to_write;
+                distances[neighbor] = distances[cur] + weight[i];
             }
         }
     }
+    //for (int i = 0; i < vert_count; i++) printf("%d\n", distances[i]);
 }
 
 
-__global__ void collective_closest_kernel(double *dist, int num_source_words, int vert_count, int *word_ids, double *dists) {
+__global__ void collective_closest_kernel(int *dist, int num_source_words, int vert_count, int *word_ids, int *dists) {
 
     // Word has no relation to given set
-    double no_relation = (1 / DOUBLE_MAX) * num_source_words;
+    double no_relation = (1 / INT_MAX) * num_source_words;
 
     // Get collective dist of vtx (col) to all source words (row)
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
@@ -103,10 +103,11 @@ __global__ void collective_closest_kernel(double *dist, int num_source_words, in
         printf("Starting collective closest\n");
 
     while (tid < vert_count) {
+        //printf("q: %d\n", dist[tid]);
         double my_dist = get_collective_dist(dist, num_source_words, vert_count, tid);
-        //printf("%d\n", dist[tid]);
         bool append = my_dist != DOUBLE_INF && my_dist != no_relation;
         if (append) {
+            //printf("FUCK %d, %d\n", my_dist, tid);
             word_ids[tid] = tid;
             dists[tid] = my_dist;
         }
@@ -174,22 +175,27 @@ int main(int argc, char **argv) {
     HANDLE_ERR(cudaMalloc((void **) &csr_d, sizeof(long) * csr->edge_count));
     HANDLE_ERR(cudaMemcpy (csr_d, csr->csr, sizeof(long) * csr->edge_count, cudaMemcpyHostToDevice));
 
+    int *weight_int = (int *)malloc(sizeof(int) * csr->edge_count);
+    for (int i = 0; i < csr->edge_count; i++) {
+        weight_int[i] = (int) (csr->weight[i] * 1000);
+    }
+
     // Weights array
-    double *weight_d;
-    HANDLE_ERR(cudaMalloc((void **) &weight_d, sizeof(double) * csr->edge_count));
-    HANDLE_ERR(cudaMemcpy (weight_d, csr->weight, sizeof(double) * csr->edge_count, cudaMemcpyHostToDevice));
+    int *weight_d;
+    HANDLE_ERR(cudaMalloc((void **) &weight_d, sizeof(int) * csr->edge_count));
+    HANDLE_ERR(cudaMemcpy (weight_d, weight_int, sizeof(int) * csr->edge_count, cudaMemcpyHostToDevice));
 
     // Matrix of dists results of sssp
-    double *dist_mat_d;
-    HANDLE_ERR(cudaMalloc((void **) &dist_mat_d, sizeof(double) * csr->vert_count * num_source_words));
+    int *dist_mat_d;
+    HANDLE_ERR(cudaMalloc((void **) &dist_mat_d, sizeof(int) * csr->vert_count * num_source_words));
 
     // Word ids of summed array
     int *word_ids_d;
     HANDLE_ERR(cudaMalloc((void **) &word_ids_d, sizeof(int) * csr->vert_count));
 
     // Word dists of summed array
-    double *dists_d;
-    HANDLE_ERR(cudaMalloc((void **) &dists_d, sizeof(double) * csr->vert_count));
+    int *dists_d;
+    HANDLE_ERR(cudaMalloc((void **) &dists_d, sizeof(int) * csr->vert_count));
 
     // Number of recommendations to make/made
     int *num_recs_d;
@@ -206,8 +212,6 @@ int main(int argc, char **argv) {
     printf("Starting SSSP\n");
 
     // Repurposing dist_mat_d
-    printf("num sw: %d\n", num_source_words);
-    printf("asdf: %d\n", source_word_idxs[tid]);
     shortest_path_weights_kernel<<<1, 1>>>(beg_pos_d, csr_d, weight_d, csr->vert_count, source_word_idxs[tid], dist_mat_d);
     cudaDeviceSynchronize();
     printf("SSSP Done\n");
@@ -224,8 +228,8 @@ int main(int argc, char **argv) {
     // BELOW THIS SAME 
     // Copy back closest_words
     int *ids = (int *)malloc(sizeof(int*) * csr->vert_count);
-    double *dists = (double *)malloc(sizeof(double*) * csr->vert_count);
-    HANDLE_ERR(cudaMemcpy (dists, dists_d, sizeof(double) * csr->vert_count, cudaMemcpyDeviceToHost));
+    int *dists = (int *)malloc(sizeof(int*) * csr->vert_count);
+    HANDLE_ERR(cudaMemcpy (dists, dists_d, sizeof(int) * csr->vert_count, cudaMemcpyDeviceToHost));
     HANDLE_ERR(cudaMemcpy (ids, word_ids_d, sizeof(int) * csr->vert_count, cudaMemcpyDeviceToHost));
 
     WordDist **wd = (WordDist**)malloc(sizeof(WordDist*) * csr->vert_count);

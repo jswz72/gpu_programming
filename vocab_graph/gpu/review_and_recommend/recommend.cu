@@ -88,7 +88,7 @@ int main(int argc, char **argv) {
     HANDLE_ERR(cudaMemcpy (num_recs_d, &num_recs, sizeof(int), cudaMemcpyHostToDevice));
 
     double starttime = wtime();
-    shortest_paths_kernel <<< 1, 1 >>> (source_idxs_d, num_source_words, beg_pos_d, csr_d, weight_d, csr->vert_count, dist_d);
+    shortest_paths_kernel <<< 32, 32 >>> (source_idxs_d, num_source_words, beg_pos_d, csr_d, weight_d, csr->vert_count, dist_d);
     cudaDeviceSynchronize();
     collective_closest_kernel <<< 128, 128 >>> (dist_d, num_source_words, csr->vert_count, word_ids_d, dists_d);
     cudaDeviceSynchronize();

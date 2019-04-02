@@ -34,10 +34,10 @@ __device__ double DOUBLE_MAX = std::numeric_limits<double>::max();
 __device__ double DOUBLE_INF = std::numeric_limits<double>::infinity();
 
 // Inverse sum rule, closness of vtx to all sources
-__device__ int get_collective_dist(int *dist, int rows, int cols, int col) {
+__device__ double get_collective_dist(int *dist, int rows, int cols, int col) {
     double sum = 0;
     for (int i = 0; i < rows; i++) {
-        sum += 1.0 / (double)dist[i * cols + col];
+        sum += 1 / (double)dist[i * cols + col];
     }
     return sum;
 }
@@ -88,26 +88,24 @@ __global__ void shortest_path_weights_kernel(long *beg_pos, long *adj_list, int 
             }
         }
     }
-    //for (int i = 0; i < vert_count; i++) printf("%d\n", distances[i]);
 }
 
 
 __global__ void collective_closest_kernel(int *dist, int num_source_words, int vert_count, int *word_ids, int *dists) {
 
     // Word has no relation to given set
-    double no_relation = (1 / INT_MAX) * num_source_words;
+    double no_relation = (1 / (double)INT_MAX) * num_source_words;
 
     // Get collective dist of vtx (col) to all source words (row)
-    int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    if (!tid)
+    int tidx = threadIdx.x + blockIdx.x * blockDim.x;
+    int tid = tidx;
+    if (!tidx)
         printf("Starting collective closest\n");
 
     while (tid < vert_count) {
-        //printf("q: %d\n", dist[tid]);
         double my_dist = get_collective_dist(dist, num_source_words, vert_count, tid);
-        bool append = my_dist != DOUBLE_INF && my_dist != no_relation;
+        bool append = my_dist != no_relation && my_dist != DOUBLE_INF;
         if (append) {
-            //printf("FUCK %d, %d\n", my_dist, tid);
             word_ids[tid] = tid;
             dists[tid] = my_dist;
         }
@@ -117,7 +115,7 @@ __global__ void collective_closest_kernel(int *dist, int num_source_words, int v
         }
         tid += blockDim.x * gridDim.x;
     }
-    if (!tid)
+    if (!tidx)
         printf("Done with collective closest\n");
 }
 
@@ -218,8 +216,11 @@ int main(int argc, char **argv) {
     double endtime = wtime();
     cout << "Time for SSSP: " << endtime - starttime << endl;
 
+    starttime = wtime();
     collective_closest_kernel <<< 128, 128 >>> (dist_mat_d, num_source_words, csr->vert_count, word_ids_d, dists_d);
     cudaDeviceSynchronize();
+    endtime = wtime();
+    cout << "Time for collective closest: " << endtime - starttime << endl;
 
 
     

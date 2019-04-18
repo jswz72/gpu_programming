@@ -1,7 +1,11 @@
 #include <limits>
 #include <algorithm>
+#include <cstdlib>
 #include <iostream>
+#include <iostream>
+#include "graph.h"
 #include "error_handler.h"
+#include "wtime.h"
 
 using std::cout;
 using std::endl;
@@ -172,7 +176,6 @@ int minDistance(int *shortestDistances, bool *finalizedVertices, const int sourc
     for (int v = 0; v < N; v++)
         if (finalizedVertices[v] == false && shortestDistances[v] <= min) min = shortestDistances[v], minIndex = v;
 
-    cout << "mIn: " << minIndex << endl;
     return minIndex;
 }
 
@@ -215,69 +218,57 @@ void dijkstraCPU(int *beg_pos, int *adj_list, int *weights, int *h_shortestDista
             if (!h_finalizedVertices[v] &&
                 found &&
                 h_shortestDistances[currentVertex] != INT_MAX &&
-                h_shortestDistances[currentVertex] + weights[idx] < h_shortestDistances[v])
+                h_shortestDistances[currentVertex] + weights[idx] < h_shortestDistances[v]) {
 
                 h_shortestDistances[v] = h_shortestDistances[currentVertex] + weights[idx];
+                //cout << weights[idx] << endl;
+            }
         }
     }
 }
 
-int main() {
-    int source_vertex = 0;
+int main(int argc, char **argv) {
+    int source_vertex = atoi(argv[1]);
+    graph<long, long, double, long, long, double> *csr = 
+        new graph<long, long, double, long, long, double>
+        ("../../get_edges/edge-list.txt_beg_pos.bin",
+         "../../get_edges/edge-list.txt_csr.bin",
+         "../../get_edges/edge-list.txt_weight.bin");
 
-    int num_vtx = 4;
-    int *beg_pos = new int[5];
-    beg_pos[0] = 0;
-    beg_pos[1] = 2;
-    beg_pos[2] = 5;
-    beg_pos[3] = 8;
-    beg_pos[4] = 10;
+    int *shortest_dist_cpu = (int *)malloc(csr->vert_count * sizeof(int));
 
-    int *adj_list = new int[10];
-    adj_list[0] = 1;
-    adj_list[1] = 2;
-    adj_list[2] = 0;
-    adj_list[3] = 2;
-    adj_list[4] = 3;
-    adj_list[5] = 0;
-    adj_list[6] = 1;
-    adj_list[7] = 3;
-    adj_list[8] = 1;
-    adj_list[9] = 2;
+    int *beg_pos = (int *)malloc(csr->vert_count * sizeof(int));
+    int *adj_list = (int *)malloc(csr->edge_count * sizeof(int));
+    int *weight = (int *)malloc(csr->edge_count * sizeof(int));
 
-    int *weights = new int[10];
-    weights[0] = 2;
-    weights[1] = 3;
-    weights[2] = 2;
-    weights[3] = 4;
-    weights[4] = 4;
-    weights[5] = 3;
-    weights[6] = 4;
-    weights[7] = 10;
-    weights[8] = 4;
-    weights[9] = 10;
+    for (int i = 0; i < csr->vert_count; i++) beg_pos[i] = (int) csr->beg_pos[i];
+    
+    for (int i = 0; i < csr->edge_count; i++) adj_list[i] = (int) csr->csr[i];
+    for (int i = 0; i < csr->edge_count; i++) weight[i] = (int) (csr->weight[i] * 1000);
+    for (int i = 0; i < 500; i++) {
+        cout << "ASDF: " << weight[i] << endl;
+    }
 
-    for (int i = 0; i < num_vtx; i++) {
-        for (int j = beg_pos[i]; j < beg_pos[i + 1]; j++) {
-            cout << i << " -> " << adj_list[j] << ": " << weights[j] << endl;
+    double cpu_start = wtime();
+    cout << "INTMAX: " << INT_MAX << endl;
+    dijkstraCPU(beg_pos, adj_list, weight, shortest_dist_cpu, source_vertex, csr->vert_count);
+    for (int i = 0; i < csr->vert_count; i++) {
+        //cout << shortest_dist_cpu[i] << endl;
+    }
+    double cpu_end = wtime();
+    cout << "CPU completed in " << cpu_end - cpu_start << endl;
+    
+    int *shortest_dist_gpu = (int *) malloc(csr->vert_count * sizeof(int));
+    double gpu_start = wtime();
+    dijkstraGPU(beg_pos, adj_list, weight, source_vertex, shortest_dist_gpu, csr->vert_count, csr->edge_count);
+    double gpu_end = wtime();
+    cout << "GPU completed in " << gpu_end - gpu_start << endl;
+
+    for (int i = 0; i < csr->vert_count; i++) {
+        if (shortest_dist_gpu[i] != shortest_dist_cpu[i]) {
+            cout << "Index " << i << " fail: " << "CPU " << shortest_dist_cpu[i] 
+            << " GPU " << shortest_dist_gpu[i] << endl;
         }
-        cout << endl;
+        assert(shortest_dist_gpu[i] == shortest_dist_cpu[i]);
     }
-
-    int *shortest_dist_cpu = (int *)malloc(num_vtx * sizeof(int));
-    dijkstraCPU(beg_pos, adj_list, weights, shortest_dist_cpu, source_vertex, num_vtx);
-    cout << "CPU Results:" << endl;
-    for (int i = 0; i < num_vtx; i++) {
-        cout << shortest_dist_cpu[i] << endl;
-    }
-    cout << endl;
-
-    int *shortest_dist_gpu = (int *) malloc(num_vtx * sizeof(int));
-    dijkstraGPU(beg_pos, adj_list, weights, source_vertex, shortest_dist_gpu, 5, 10);
-
-    cout << "GPU Results:" << endl;
-    for (int i = 0; i < num_vtx; i++) {
-        cout << shortest_dist_gpu[i] << endl;
-    }
-    cout << endl;
 }

@@ -1,6 +1,7 @@
 #include <limits>
 #include <algorithm>
 #include <iostream>
+#include "error_handler.h"
 
 using std::cout;
 using std::endl;
@@ -100,9 +101,9 @@ __global__  void Kernel2(const int * __restrict__ vertexArray, const int * __res
 void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int sourceVertex, int * __restrict__ h_shortestDistances, int num_vtx, int num_edge) {
 
     // --- Create device-side adjacency-list, namely, vertex array Va, edge array Ea and weight array Wa from G(V,E,W)
-    int     *d_beg_pos;         HANDLE_ERR(cudaMalloc(beg_pos,    sizeof(int)   *  num_vtx));
-    int     *d_adj_list;           HANDLE_ERR(cudaMalloc(&adj_list,  sizeof(int)   * num_edge));
-    float   *d_weights;         HANDLE_ERR(cudaMalloc(&weights,    sizeof(float) * num_edge));
+    int     *d_beg_pos;         HANDLE_ERR(cudaMalloc(&d_beg_pos,    sizeof(int)   *  num_vtx));
+    int     *d_adj_list;           HANDLE_ERR(cudaMalloc(&d_adj_list,  sizeof(int)   * num_edge));
+    int   *d_weights;         HANDLE_ERR(cudaMalloc(&d_weights,    sizeof(int) * num_edge));
 
     // --- Copy adjacency-list to the device
     HANDLE_ERR(cudaMemcpy(d_beg_pos, beg_pos, sizeof(int)   * num_vtx, cudaMemcpyHostToDevice));
@@ -114,11 +115,12 @@ void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int sourceVert
     int   *d_shortestDistances;           HANDLE_ERR(cudaMalloc(&d_shortestDistances,       sizeof(int) * num_vtx));
     int   *d_updatingShortestDistances;   HANDLE_ERR(cudaMalloc(&d_updatingShortestDistances, sizeof(int) * num_vtx));
 
-    bool *h_finalizedVertices = (bool *)malloc(sizeof(bool) * graph->numVertices);
+    bool *h_finalizedVertices = (bool *)malloc(sizeof(bool) * num_vtx);
 
     // --- Initialize mask Ma to false, cost array Ca and Updating cost array Ua to \u221e
-    initializeArrays <<<iDivUp(num_vtx, BLOCK_SIZE), BLOCK_SIZE >>>(d_finalizedVertices, d_shortestDistances,
-                                                            d_updatingShortestDistances, sourceVertex, num_vtx);
+    initializeArrays 
+        <<<iDivUp(num_vtx, 16), 16 >>>
+        (d_finalizedVertices, d_shortestDistances, d_updatingShortestDistances, sourceVertex, num_vtx);
     HANDLE_ERR(cudaPeekAtLastError());
     HANDLE_ERR(cudaDeviceSynchronize());
 
@@ -132,27 +134,27 @@ void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int sourceVert
         //     stalling of the GPU waiting for results.
         for (int asyncIter = 0; asyncIter < NUM_ASYNCHRONOUS_ITERATIONS; asyncIter++) {
 
-            Kernel1 <<<iDivUp(num_vtx, BLOCK_SIZE), BLOCK_SIZE >>>(d_beg_pos, d_adj_list, d_weights, d_finalizedVertices, d_shortestDistances,
+            Kernel1 <<<iDivUp(num_vtx, 16), 16 >>>(d_beg_pos, d_adj_list, d_weights, d_finalizedVertices, d_shortestDistances,
                                                             d_updatingShortestDistances, num_vtx, num_edge);
             HANDLE_ERR(cudaPeekAtLastError());
             HANDLE_ERR(cudaDeviceSynchronize());
-            Kernel2 <<<iDivUp(num_vtx, BLOCK_SIZE), BLOCK_SIZE >>>(d_beg_pos, d_adj_list, d_weights, d_finalizedVertices, d_shortestDistances, d_updatingShortestDistances,
+            Kernel2 <<<iDivUp(num_vtx, 16), 16 >>>(d_beg_pos, d_adj_list, d_weights, d_finalizedVertices, d_shortestDistances, d_updatingShortestDistances,
                                                             num_vtx);
             HANDLE_ERR(cudaPeekAtLastError());
             HANDLE_ERR(cudaDeviceSynchronize());
         }
 
-        HANDLE_ERR(cudaMemcpy(h_finalizedVertices, d_finalizedVertices, sizeof(bool) * graph->numVertices, cudaMemcpyDeviceToHost));
+        HANDLE_ERR(cudaMemcpy(h_finalizedVertices, d_finalizedVertices, sizeof(bool) * num_vtx, cudaMemcpyDeviceToHost));
     }
 
     // --- Copy the result to host
-    HANDLE_ERR(cudaMemcpy(h_shortestDistances, d_shortestDistances, sizeof(float) * graph->numVertices, cudaMemcpyDeviceToHost));
+    HANDLE_ERR(cudaMemcpy(h_shortestDistances, d_shortestDistances, sizeof(int) * num_vtx, cudaMemcpyDeviceToHost));
 
     free(h_finalizedVertices);
 
-    HANDLE_ERR(cudaFree(d_vertexArray));
-    HANDLE_ERR(cudaFree(d_edgeArray));
-    HANDLE_ERR(cudaFree(d_weightArray));
+    HANDLE_ERR(cudaFree(d_beg_pos));
+    HANDLE_ERR(cudaFree(d_adj_list));
+    HANDLE_ERR(cudaFree(d_weights));
     HANDLE_ERR(cudaFree(d_finalizedVertices));
     HANDLE_ERR(cudaFree(d_shortestDistances));
     HANDLE_ERR(cudaFree(d_updatingShortestDistances));

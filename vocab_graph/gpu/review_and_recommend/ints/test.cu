@@ -93,6 +93,7 @@ __global__  void Kernel2(const int * __restrict__ vertexArray,
 // Main function handling djikstra's kernels
 void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int sourceVertex, int * __restrict__ h_shortestDistances, int num_vtx, int num_edge) {
 
+    double s1 = wtime();
     int *d_beg_pos;
     HANDLE_ERR(cudaMalloc(&d_beg_pos, sizeof(int) * num_vtx));
     int *d_adj_list;
@@ -119,6 +120,9 @@ void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int sourceVert
 
     bool *h_finalizedVertices = (bool *)malloc(sizeof(bool) * num_vtx);
 
+    double e1 = wtime();
+    cout << "Time to init n copy: " << e1 - s1 << endl;
+    double start = wtime();
     // Mask to 0's, cost and updating arrays to inf
     initializeArrays 
         <<<iDivUp(num_vtx, 16), 16 >>>
@@ -149,6 +153,9 @@ void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int sourceVert
         HANDLE_ERR(cudaMemcpy(h_finalizedVertices, d_finalizedVertices,
                 sizeof(bool) * num_vtx, cudaMemcpyDeviceToHost));
     }
+    double end = wtime();
+    double s2 = wtime();
+    cout << "Inner GPU time: " << end - start << endl;
 
     HANDLE_ERR(cudaMemcpy(h_shortestDistances, d_shortestDistances, sizeof(int) * num_vtx, cudaMemcpyDeviceToHost));
 
@@ -160,6 +167,8 @@ void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int sourceVert
     HANDLE_ERR(cudaFree(d_finalizedVertices));
     HANDLE_ERR(cudaFree(d_shortestDistances));
     HANDLE_ERR(cudaFree(d_updatingShortestDistances));
+    double e2 = wtime();
+    cout << "Copy out and free time: " << e2 - s2 << endl;
 }
 
 // Get index of vertex not included in path with min dist

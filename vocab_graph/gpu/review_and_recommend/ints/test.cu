@@ -13,14 +13,18 @@ using std::endl;
 #define BLOCK_SIZE 16;
 #define NUM_ASYNCHRONOUS_ITERATIONS 20  // Number of async loop iterations before attempting to read results back
 
+const bool const_true = true;
+
 // Check whether all verticies done
-bool all_vertices_done(bool *finished_verts, int num_vtx) {
+__global__ void CheckDoneKernel(bool *finished_verts, int num_vtx, bool *finished) {
 
-    for (int i = 0; i < num_vtx; i++)
-        if (finished_verts[i] == true)
-            return false;
+    int tid = blockIdx.x * blockDim.x + threadIdx.x;
+    while (*finished && tid < num_vtx) {
+        if (finished_verts[tid] == true)
+           *finished = false;
+        tid += blockDim.x * gridDim.x;
+    }
 
-    return true;
 }
 
 // division ceiling
@@ -114,7 +118,7 @@ void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int source,
     bool *finished_vtxs = (bool *)malloc(sizeof(bool) * num_vtx);
 
     double e1 = wtime();
-    cout << "Time to init n copy: " << e1 - s1 << endl;
+    cout << "Time to init and copy: " << e1 - s1 << endl;
     double start = wtime();
     // Mask to 0's, cost and updating arrays to inf
     init_sssp_arrs <<<div_ceil(num_vtx, 16), 16 >>>
@@ -124,7 +128,10 @@ void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int source,
     HANDLE_ERR(cudaMemcpy(finished_vtxs, d_finished_verts, 
                 sizeof(bool) * num_vtx, cudaMemcpyDeviceToHost));
 
-    while (!all_vertices_done(finished_vtxs, num_vtx)) {
+    bool finished = false;
+    bool *d_finished;
+    HANDLE_ERR(cudaMalloc(&d_finished, sizeof(bool)));
+    while (!finished) {
         // --- In order to improve performance, we run some number of iterations without reading the results.  This might result
         //     in running more iterations than necessary at times, but it will in most cases be faster because we are doing less
         //     stalling of the GPU waiting for results.
@@ -138,8 +145,10 @@ void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int source,
                 d_update_dists, num_vtx);
             HANDLE_ERR(cudaDeviceSynchronize());
         }
-        HANDLE_ERR(cudaMemcpy(finished_vtxs, d_finished_verts,
-                sizeof(bool) * num_vtx, cudaMemcpyDeviceToHost));
+        HANDLE_ERR(cudaMemcpy(d_finished, &const_true, sizeof(bool), cudaMemcpyHostToDevice));
+        CheckDoneKernel <<< div_ceil(num_vtx, 16), 16 >>> (d_finished_verts, num_vtx, d_finished);
+        HANDLE_ERR(cudaDeviceSynchronize());
+        HANDLE_ERR(cudaMemcpy(&finished, d_finished, sizeof(bool), cudaMemcpyDeviceToHost));
     }
     double end = wtime();
     double s2 = wtime();
@@ -229,10 +238,16 @@ int main(int argc, char **argv) {
     int *adj_list = (int *)malloc(csr->edge_count * sizeof(int));
     int *weight = (int *)malloc(csr->edge_count * sizeof(int));
 
-    for (int i = 0; i < csr->vert_count; i++) beg_pos[i] = (int) csr->beg_pos[i];
+    // Long -> int
+    for (int i = 0; i < csr->vert_count; i++) 
+        beg_pos[i] = (int) csr->beg_pos[i];
     
-    for (int i = 0; i < csr->edge_count; i++) adj_list[i] = (int) csr->csr[i];
-    for (int i = 0; i < csr->edge_count; i++) weight[i] = (int) (csr->weight[i] * 1000);
+    // Long -> int
+    for (int i = 0; i < csr->edge_count; i++) 
+        adj_list[i] = (int) csr->csr[i];
+    // Double -> int
+    for (int i = 0; i < csr->edge_count; i++) 
+        weight[i] = (int) (csr->weight[i] * 1000);
 
         
     int *shortest_dist_gpu = (int *) malloc(csr->vert_count * sizeof(int));

@@ -108,23 +108,9 @@ __global__  void Kernel2(const int * __restrict__ beg_pos,
 }
 
 // Main function handling djikstra's kernels
-void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int source, 
+void dijkstraGPU(int *d_beg_pos, int *d_adj_list, int *d_weights, const int source, 
         int * __restrict__ dists, int num_vtx, int num_edge) {
-    double s1 = wtime();
-    int *d_beg_pos;
-    HANDLE_ERR(cudaMalloc(&d_beg_pos, sizeof(int) * num_vtx));
-    int *d_adj_list;
-    HANDLE_ERR(cudaMalloc(&d_adj_list, sizeof(int) * num_edge));
-    int *d_weights;
-    HANDLE_ERR(cudaMalloc(&d_weights, sizeof(int) * num_edge));
-
-    HANDLE_ERR(cudaMemcpy(d_beg_pos, beg_pos, sizeof(int) * num_vtx,
-                cudaMemcpyHostToDevice));
-    HANDLE_ERR(cudaMemcpy(d_adj_list, adj_list, sizeof(int) * num_edge,
-                cudaMemcpyHostToDevice));
-    HANDLE_ERR(cudaMemcpy(d_weights, weights, sizeof(int) * num_edge,
-                cudaMemcpyHostToDevice));
-
+    
     // Mask array
     bool *d_finished_verts;
     HANDLE_ERR(cudaMalloc(&d_finished_verts, sizeof(bool) * num_vtx));
@@ -135,11 +121,8 @@ void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int source,
     int *d_update_dists;
     HANDLE_ERR(cudaMalloc(&d_update_dists, sizeof(int) * num_vtx));
 
-    bool *finished_vtxs = (bool *)malloc(sizeof(bool) * num_vtx);
 
-    double e1 = wtime();
-    //cout << "Time to init and copy: " << e1 - s1 << endl;
-    double start = wtime();
+    bool *finished_vtxs = (bool *)malloc(sizeof(bool) * num_vtx);
     // Mask to 0's, cost and updating arrays to inf
     init_sssp_arrs <<<div_ceil(num_vtx, 16), 16 >>>
         (d_finished_verts, d_dists, d_update_dists, source, num_vtx);
@@ -170,22 +153,14 @@ void dijkstraGPU(int *beg_pos, int *adj_list, int *weights, const int source,
         HANDLE_ERR(cudaDeviceSynchronize());
         HANDLE_ERR(cudaMemcpy(&finished, d_finished, sizeof(bool), cudaMemcpyDeviceToHost));
     }
-    double end = wtime();
-    double s2 = wtime();
-    //cout << "Inner GPU time: " << end - start << endl;
 
     HANDLE_ERR(cudaMemcpy(dists, d_dists, sizeof(int) * num_vtx, cudaMemcpyDeviceToHost));
 
     free(finished_vtxs);
-
-    HANDLE_ERR(cudaFree(d_beg_pos));
-    HANDLE_ERR(cudaFree(d_adj_list));
-    HANDLE_ERR(cudaFree(d_weights));
     HANDLE_ERR(cudaFree(d_finished_verts));
     HANDLE_ERR(cudaFree(d_dists));
     HANDLE_ERR(cudaFree(d_update_dists));
-    double e2 = wtime();
-    //cout << "Copy out and free time: " << e2 - s2 << endl;
+
 }
 
 // Get index of vertex not included in path with min dist
@@ -201,26 +176,6 @@ int min_dist(int *dists, bool *finished_verts,
     return minIndex;
 }
 
-int *shortest_path_weights(CSR *csr, int source_word) {
-    int *beg_pos = (int *)malloc(csr->vert_count * sizeof(int));
-    int *adj_list = (int *)malloc(csr->edge_count * sizeof(int));
-    int *weight = (int *)malloc(csr->edge_count * sizeof(int));
-
-    // Long -> int
-    for (int i = 0; i < csr->vert_count; i++) 
-        beg_pos[i] = (int) csr->beg_pos[i];
-    
-    // Long -> int
-    for (int i = 0; i < csr->edge_count; i++) 
-        adj_list[i] = (int) csr->csr[i];
-    // Double -> int
-    for (int i = 0; i < csr->edge_count; i++) 
-        weight[i] = (int) (csr->weight[i] * 1000);
-
-    int *shortest_dist_gpu = (int *) malloc(csr->vert_count * sizeof(int));
-    dijkstraGPU(beg_pos, adj_list, weight, source_word, shortest_dist_gpu, csr->vert_count, csr->edge_count);
-    return shortest_dist_gpu;
-}
 
 double get_collective_dist(int *dist, int rows, int cols, int col) {
     double sum = 0;
@@ -241,15 +196,53 @@ WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
     // All vtxs, sorted in terms of closest
 	WordDist ** word_dist = (WordDist **)malloc(sizeof(WordDist*) * csr->vert_count);
 
+    int *beg_pos = (int *)malloc(csr->vert_count * sizeof(int));
+    int *adj_list = (int *)malloc(csr->edge_count * sizeof(int));
+    int *weight = (int *)malloc(csr->edge_count * sizeof(int));
+
+    // Long -> int
+    for (int i = 0; i < csr->vert_count; i++) 
+        beg_pos[i] = (int) csr->beg_pos[i];
+    
+    // Long -> int
+    for (int i = 0; i < csr->edge_count; i++) 
+        adj_list[i] = (int) csr->csr[i];
+    // Double -> int
+    for (int i = 0; i < csr->edge_count; i++) 
+        weight[i] = (int) (csr->weight[i] * 1000);
+
+    int *shortest_dist_gpu = (int *) malloc(csr->vert_count * sizeof(int));
+    int *d_beg_pos;
+    HANDLE_ERR(cudaMalloc(&d_beg_pos, sizeof(int) * csr->vert_count));
+    int *d_adj_list;
+    HANDLE_ERR(cudaMalloc(&d_adj_list, sizeof(int) * csr->edge_count));
+    int *d_weights;
+    HANDLE_ERR(cudaMalloc(&d_weights, sizeof(int) * csr->edge_count));
+    
+
+    HANDLE_ERR(cudaMemcpy(d_beg_pos, beg_pos, sizeof(int) * csr->vert_count, cudaMemcpyHostToDevice));
+    HANDLE_ERR(cudaMemcpy(d_adj_list, adj_list, sizeof(int) * csr->edge_count,
+                cudaMemcpyHostToDevice));
+    HANDLE_ERR(cudaMemcpy(d_weights, weight, sizeof(int) * csr->edge_count,
+                cudaMemcpyHostToDevice));
+
+
+
     // Fill out dists to all vtxs (dist col) from word (dist row)
     for (int i = 0; i < n; i++) {
         int cols = csr->vert_count;
-        int *shortest_paths = shortest_path_weights(csr, source_words[i]);
+        dijkstraGPU(d_beg_pos, d_adj_list, d_weights, source_words[i], shortest_dist_gpu, csr->vert_count, csr->edge_count);
         for (int j = 0; j < cols; j++) {
-            dist[i * cols + j] = shortest_paths[j];
+            dist[i * cols + j] = shortest_dist_gpu[j];
         }
     }
 
+
+
+    HANDLE_ERR(cudaFree(d_beg_pos));
+    HANDLE_ERR(cudaFree(d_adj_list));
+    HANDLE_ERR(cudaFree(d_weights));
+    
     // Get collective dist of vtx (col) to all source words (row)
     for (int i = 0; i < csr->vert_count; i++) {
         WordDist *wd = new WordDist(get_collective_dist(dist, n, csr->vert_count, i), i);

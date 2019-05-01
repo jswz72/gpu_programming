@@ -237,6 +237,7 @@ WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
                 cudaMemcpyHostToDevice));
 
 
+    double inner_start = wtime();
 
     // Fill out dists to all vtxs (dist col) from word (dist row)
     for (int i = 0; i < n; i++) {
@@ -276,6 +277,8 @@ WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
     {
         return a->dist > b->dist;
     });
+
+    cout << "Inner algo time: " << wtime() - inner_start << endl;
 
 	return word_dist;
 }

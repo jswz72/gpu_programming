@@ -298,6 +298,12 @@ int main(int argc, char **argv) {
 		new graph <long, long, double, long, long, double>
 		(beg_file.c_str(), csr_file.c_str(), weight_file.c_str());
 
+    long total_degrees = 0;
+    for (int i = 0; i < csr->vert_count; i++) {
+        total_degrees += csr->beg_pos[i + 1] - csr->beg_pos[i];
+    }
+    cout << "Average degree: " << total_degrees / csr->vert_count << endl;
+
     // Output Graph Info
 	std::cout << "Edges: " << csr->edge_count << std::endl;
     std::cout << "Verticies: " << csr->vert_count << std::endl;

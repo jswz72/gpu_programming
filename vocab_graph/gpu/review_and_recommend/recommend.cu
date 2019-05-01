@@ -177,7 +177,7 @@ int min_dist(int *dists, bool *finished_verts,
 }
 
 
-double get_collective_dist(int *dist, int rows, int cols, int col) {
+__device__ double get_collective_dist(int *dist, int rows, int cols, int col) {
     double sum = 0;
     for (int i = 0; i < rows; i++) {
         //cout << dist[i * cols + col] << endl;
@@ -187,6 +187,16 @@ double get_collective_dist(int *dist, int rows, int cols, int col) {
         sum += (1 / (double)dist[i * cols + col]);
     }
     return sum;
+}
+
+__global__ void collective_dist_kernel(int *dist, int rows, int cols, 
+        double *col_dist)
+{
+    int tid = threadIdx.x + blockIdx.x * blockDim.x;
+    while (tid < cols) {
+        col_dist[tid] = get_collective_dist(dist, rows, cols, tid);
+        tid += blockDim.x * gridDim.x;
+    }
 }
 
 WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
@@ -242,10 +252,23 @@ WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
     HANDLE_ERR(cudaFree(d_beg_pos));
     HANDLE_ERR(cudaFree(d_adj_list));
     HANDLE_ERR(cudaFree(d_weights));
+
+    int *d_dist;
+    HANDLE_ERR(cudaMalloc(&d_dist, sizeof(int) * n * csr->vert_count));
+    HANDLE_ERR(cudaMemcpy(d_dist, dist, sizeof(int) * n * csr->vert_count, cudaMemcpyHostToDevice));
+
+    double *d_col_dist;
+    HANDLE_ERR(cudaMalloc(&d_col_dist, sizeof(double) * csr->vert_count));
+
+    collective_dist_kernel<<<div_ceil(csr->vert_count, 16), 16>>>
+        (d_dist, n, csr->vert_count, d_col_dist);
+
+    double *col_dist = (double *)malloc(sizeof(double) * csr->vert_count);
+    HANDLE_ERR(cudaMemcpy(col_dist, d_col_dist, sizeof(double) * csr->vert_count, cudaMemcpyDeviceToHost));
     
     // Get collective dist of vtx (col) to all source words (row)
     for (int i = 0; i < csr->vert_count; i++) {
-        WordDist *wd = new WordDist(get_collective_dist(dist, n, csr->vert_count, i), i);
+        WordDist *wd = new WordDist(col_dist[i], i);
         word_dist[i] = wd;
     }
     // Sort in terms of collect closest

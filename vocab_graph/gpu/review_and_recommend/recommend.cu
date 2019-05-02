@@ -99,7 +99,8 @@ __global__  void Kernel2(const int * __restrict__ beg_pos,
     if (tid < num_vtx) {
         if (dists[tid] > update_dists[tid]) {
             dists[tid] = update_dists[tid];
-            finished_verts[tid] = true; }
+            finished_verts[tid] = true; 
+        }
         update_dists[tid] = dists[tid];
     }
 }

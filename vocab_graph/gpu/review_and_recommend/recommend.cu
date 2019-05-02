@@ -30,9 +30,6 @@ std::vector<string> get_word_mapping(const char *mapping_file) {
 	return words;
 }
 
-#define BLOCK_SIZE 16;
-#define NUM_ASYNCHRONOUS_ITERATIONS 20  // Number of async loop iterations before attempting to read results back
-
 const bool const_true = true;
 
 // Check whether all verticies done
@@ -135,19 +132,13 @@ void dijkstraGPU(int *d_beg_pos, int *d_adj_list, int *d_weights, const int sour
     bool *d_finished;
     HANDLE_ERR(cudaMalloc(&d_finished, sizeof(bool)));
     while (!finished) {
-        // --- In order to improve performance, we run some number of iterations without reading the results.  This might result
-        //     in running more iterations than necessary at times, but it will in most cases be faster because we are doing less
-        //     stalling of the GPU waiting for results.
-        for (int asyncIter = 0; asyncIter < NUM_ASYNCHRONOUS_ITERATIONS; 
-                asyncIter++) {
-            Kernel1 <<<div_ceil(num_vtx, 16), 16 >>>(d_beg_pos, d_adj_list, 
-                    d_weights, d_finished_verts, d_dists, d_update_dists, num_vtx);
-            HANDLE_ERR(cudaDeviceSynchronize());
-            Kernel2 <<<div_ceil(num_vtx, 16), 16 >>>(d_beg_pos, d_adj_list, 
-                d_weights, d_finished_verts, d_dists,
-                d_update_dists, num_vtx);
-            HANDLE_ERR(cudaDeviceSynchronize());
-        }
+        Kernel1 <<<div_ceil(num_vtx, 16), 16 >>>(d_beg_pos, d_adj_list, 
+                d_weights, d_finished_verts, d_dists, d_update_dists, num_vtx);
+        HANDLE_ERR(cudaDeviceSynchronize());
+        Kernel2 <<<div_ceil(num_vtx, 16), 16 >>>(d_beg_pos, d_adj_list, 
+            d_weights, d_finished_verts, d_dists,
+            d_update_dists, num_vtx);
+        HANDLE_ERR(cudaDeviceSynchronize());
         HANDLE_ERR(cudaMemcpy(d_finished, &const_true, sizeof(bool), cudaMemcpyHostToDevice));
         CheckDoneKernel <<< div_ceil(num_vtx, 16), 16 >>> (d_finished_verts, num_vtx, d_finished);
         HANDLE_ERR(cudaDeviceSynchronize());
@@ -200,12 +191,7 @@ __global__ void collective_dist_kernel(int *dist, int rows, int cols,
 }
 
 WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
-    // Row for each source word, col for each vtx
-    int *dist = (int *)malloc(sizeof(int) * n * csr->vert_count);
-
-    // All vtxs, sorted in terms of closest
-	WordDist ** word_dist = (WordDist **)malloc(sizeof(WordDist*) * csr->vert_count);
-
+    
     int *beg_pos = (int *)malloc(csr->vert_count * sizeof(int));
     int *adj_list = (int *)malloc(csr->edge_count * sizeof(int));
     int *weight = (int *)malloc(csr->edge_count * sizeof(int));
@@ -238,6 +224,12 @@ WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
 
 
     double inner_start = wtime();
+    // Row for each source word, col for each vtx
+    int *dist = (int *)malloc(sizeof(int) * n * csr->vert_count);
+
+    // All vtxs, sorted in terms of closest
+	WordDist ** word_dist = (WordDist **)malloc(sizeof(WordDist*) * csr->vert_count);
+
 
     // Fill out dists to all vtxs (dist col) from word (dist row)
     for (int i = 0; i < n; i++) {

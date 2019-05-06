@@ -21,6 +21,9 @@ struct WordDist {
 
 typedef graph<long, long, double, long, long, double> CSR;
 
+const bool const_true = true;
+
+// Get word vector from word file
 std::vector<string> get_word_mapping(const char *mapping_file) {
 	std::ifstream infile(mapping_file);
 	std::vector<string> words;
@@ -30,55 +33,53 @@ std::vector<string> get_word_mapping(const char *mapping_file) {
 	return words;
 }
 
-const bool const_true = true;
-
 // Check whether all verticies done
-__global__ void CheckDoneKernel(bool *finished_verts, int num_vtx, bool *finished) {
+__global__ void check_done_kernel(bool *mask, int num_vtx, bool *finished) {
 
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     while (*finished && tid < num_vtx) {
-        if (finished_verts[tid] == true)
+        if (mask[tid])
            *finished = false;
         tid += blockDim.x * gridDim.x;
     }
 
 }
 
-// division ceiling
+// Division ceiling
 int div_ceil(int numer, int denom) {
     return (numer % denom != 0) ? (numer / denom + 1) : (numer / denom);
 }
 
-__global__ void init_sssp_arrs(bool * __restrict__ d_finished_verts, 
-        int* __restrict__ d_dists, 
-        int* __restrict__ d_update_dists, const int source, 
+__global__ void init_sssp_data(bool * d_mask, 
+        int* d_dists, 
+        int* d_update_dists, const int source, 
         const int num_vtx) {
 
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < num_vtx) {
         if (source == tid) {
-            d_finished_verts[tid] = true;
+            d_mask[tid] = true;
             d_dists[tid] = 0;
             d_update_dists[tid] = 0;
         }
         else {
-            d_finished_verts[tid] = false;
+            d_mask[tid] = false;
             d_dists[tid] = INT_MAX;
             d_update_dists[tid] = INT_MAX;
         }
     }
 }
 
-// First portion GPU work for djikstra's
-__global__  void Kernel1(const int * __restrict__ beg_pos, 
-        const int* __restrict__ adj_list, const int * __restrict__ weights,
-        bool * __restrict__ finished_verts, int* __restrict__ dists,
-        int * __restrict__ update_dists, const int num_vtx) {
+// First portion GPU work for djikstra's - get new values for updating dists
+__global__  void get_dists_kernel(const int * beg_pos, 
+        const int* adj_list, const int * weights,
+        bool * mask, int* dists,
+        int * update_dists, const int num_vtx) {
 
     int tid = blockIdx.x*blockDim.x + threadIdx.x;
     if (tid < num_vtx) {
-        if (finished_verts[tid] == true) {
-            finished_verts[tid] = false;
+        if (mask[tid] == true) {
+            mask[tid] = false;
             for (int edge = beg_pos[tid]; edge < beg_pos[tid + 1]; edge++) {
                 int other = adj_list[edge];
                 atomicMin(&update_dists[other], 
@@ -89,29 +90,29 @@ __global__  void Kernel1(const int * __restrict__ beg_pos,
 }
 
 // Second portion of GPU work for djikstra's
-__global__  void Kernel2(const int * __restrict__ beg_pos, 
-        const int * __restrict__ adj_list, 
-        const int* __restrict__ weights, bool * __restrict__ finished_verts,
-        int* __restrict__ dists, 
-        int* __restrict__ update_dists, const int num_vtx) {
+__global__  void update_dists_kernel(const int * beg_pos, 
+        const int * adj_list, 
+        const int* weights, bool * mask,
+        int* dists, 
+        int* update_dists, const int num_vtx) {
 
     int tid = blockIdx.x * blockDim.x + threadIdx.x;
     if (tid < num_vtx) {
         if (dists[tid] > update_dists[tid]) {
             dists[tid] = update_dists[tid];
-            finished_verts[tid] = true; 
+            mask[tid] = true; 
         }
         update_dists[tid] = dists[tid];
     }
 }
 
-// Main function handling djikstra's kernels
-void dijkstraGPU(int *d_beg_pos, int *d_adj_list, int *d_weights, const int source, 
-        int * __restrict__ dists, int num_vtx, int num_edge) {
+// Main function handling SSSP using kernels to implement parallel dijkstra's algorithm
+void SSSP_GPU(int *d_beg_pos, int *d_adj_list, int *d_weights, const int source, 
+        int * dists, int num_vtx, int num_edge) {
     
     // Mask array
-    bool *d_finished_verts;
-    HANDLE_ERR(cudaMalloc(&d_finished_verts, sizeof(bool) * num_vtx));
+    bool *d_mask;
+    HANDLE_ERR(cudaMalloc(&d_mask, sizeof(bool) * num_vtx));
     // Cost array
     int *d_dists;
     HANDLE_ERR(cudaMalloc(&d_dists, sizeof(int) * num_vtx));
@@ -122,26 +123,26 @@ void dijkstraGPU(int *d_beg_pos, int *d_adj_list, int *d_weights, const int sour
 
     bool *finished_vtxs = (bool *)malloc(sizeof(bool) * num_vtx);
     // Mask to 0's, cost and updating arrays to inf
-    init_sssp_arrs <<<div_ceil(num_vtx, 16), 16 >>>
-        (d_finished_verts, d_dists, d_update_dists, source, num_vtx);
+    init_sssp_data <<<div_ceil(num_vtx, 16), 16 >>>
+        (d_mask, d_dists, d_update_dists, source, num_vtx);
     HANDLE_ERR(cudaDeviceSynchronize());
 
-    HANDLE_ERR(cudaMemcpy(finished_vtxs, d_finished_verts, 
+    HANDLE_ERR(cudaMemcpy(finished_vtxs, d_mask, 
                 sizeof(bool) * num_vtx, cudaMemcpyDeviceToHost));
 
     bool finished = false;
     bool *d_finished;
     HANDLE_ERR(cudaMalloc(&d_finished, sizeof(bool)));
     while (!finished) {
-        Kernel1 <<<div_ceil(num_vtx, 16), 16 >>>(d_beg_pos, d_adj_list, 
-                d_weights, d_finished_verts, d_dists, d_update_dists, num_vtx);
+        get_dists_kernel <<<div_ceil(num_vtx, 16), 16 >>>(d_beg_pos, d_adj_list, 
+                d_weights, d_mask, d_dists, d_update_dists, num_vtx);
         HANDLE_ERR(cudaDeviceSynchronize());
-        Kernel2 <<<div_ceil(num_vtx, 16), 16 >>>(d_beg_pos, d_adj_list, 
-            d_weights, d_finished_verts, d_dists,
+        update_dists_kernel <<<div_ceil(num_vtx, 16), 16 >>>(d_beg_pos, d_adj_list, 
+            d_weights, d_mask, d_dists,
             d_update_dists, num_vtx);
         HANDLE_ERR(cudaDeviceSynchronize());
         HANDLE_ERR(cudaMemcpy(d_finished, &const_true, sizeof(bool), cudaMemcpyHostToDevice));
-        CheckDoneKernel <<< div_ceil(num_vtx, 16), 16 >>> (d_finished_verts, num_vtx, d_finished);
+        check_done_kernel <<< div_ceil(num_vtx, 16), 16 >>> (d_mask, num_vtx, d_finished);
         HANDLE_ERR(cudaDeviceSynchronize());
         HANDLE_ERR(cudaMemcpy(&finished, d_finished, sizeof(bool), cudaMemcpyDeviceToHost));
     }
@@ -149,30 +150,30 @@ void dijkstraGPU(int *d_beg_pos, int *d_adj_list, int *d_weights, const int sour
     HANDLE_ERR(cudaMemcpy(dists, d_dists, sizeof(int) * num_vtx, cudaMemcpyDeviceToHost));
 
     free(finished_vtxs);
-    HANDLE_ERR(cudaFree(d_finished_verts));
+    HANDLE_ERR(cudaFree(d_mask));
     HANDLE_ERR(cudaFree(d_dists));
     HANDLE_ERR(cudaFree(d_update_dists));
 
 }
 
-// Get index of vertex not included in path with min dist
-int min_dist(int *dists, bool *finished_verts, 
+// Get index of vertex not included in mask with min dist
+int min_dist(int *dists, bool *mask, 
         const int source, const int N) {
-    int minIndex = source;
+    int min_index = source;
     int min = INT_MAX;
     for (int v = 0; v < N; v++)
-        if (finished_verts[v] == false && dists[v] <= min) {
+        if (mask[v] == false && dists[v] <= min) {
             min = dists[v];
-            minIndex = v;
+            min_index = v;
         }
-    return minIndex;
+    return min_index;
 }
 
 
+// Get collective dist via inverse sum of column
 __device__ double get_collective_dist(int *dist, int rows, int cols, int col) {
     double sum = 0;
     for (int i = 0; i < rows; i++) {
-        //cout << dist[i * cols + col] << endl;
         if (dist[i * cols + col] == 0) {
             return 0;
         }
@@ -181,6 +182,7 @@ __device__ double get_collective_dist(int *dist, int rows, int cols, int col) {
     return sum;
 }
 
+// Get collective dist, 1 thread per column of dist matrix
 __global__ void collective_dist_kernel(int *dist, int rows, int cols, 
         double *col_dist)
 {
@@ -192,16 +194,12 @@ __global__ void collective_dist_kernel(int *dist, int rows, int cols,
 }
 
 WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
-    
     int *beg_pos = (int *)malloc(csr->vert_count * sizeof(int));
     int *adj_list = (int *)malloc(csr->edge_count * sizeof(int));
     int *weight = (int *)malloc(csr->edge_count * sizeof(int));
 
-    // Long -> int
     for (int i = 0; i < csr->vert_count; i++) 
         beg_pos[i] = (int) csr->beg_pos[i];
-    
-    // Long -> int
     for (int i = 0; i < csr->edge_count; i++) 
         adj_list[i] = (int) csr->csr[i];
     // Double -> int
@@ -231,11 +229,10 @@ WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
     // All vtxs, sorted in terms of closest
 	WordDist ** word_dist = (WordDist **)malloc(sizeof(WordDist*) * csr->vert_count);
 
-
     // Fill out dists to all vtxs (dist col) from word (dist row)
     for (int i = 0; i < n; i++) {
         int cols = csr->vert_count;
-        dijkstraGPU(d_beg_pos, d_adj_list, d_weights, source_words[i], shortest_dist_gpu, csr->vert_count, csr->edge_count);
+        SSSP_GPU(d_beg_pos, d_adj_list, d_weights, source_words[i], shortest_dist_gpu, csr->vert_count, csr->edge_count);
         for (int j = 0; j < cols; j++) {
             dist[i * cols + j] = shortest_dist_gpu[j];
         }
@@ -271,7 +268,7 @@ WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
         return a->dist > b->dist;
     });
 
-    cout << "Inner algo time: " << wtime() - inner_start << endl;
+    cout << "GPU Algorithm Time: " << wtime() - inner_start << endl;
 
 	return word_dist;
 }
@@ -279,7 +276,7 @@ WordDist** collective_closest(std::vector<int> &source_words, int n, CSR *csr) {
 std::vector<WordDist*> recommend(CSR *csr, std::vector<int> &source_words, int num_recs) {
 	double start_time = wtime();
     WordDist** word_dist = collective_closest(source_words, source_words.size(), csr);
-	cout << "Total aglo time: " << wtime() - start_time << endl;
+	cout << "Total  GPU time: " << wtime() - start_time << endl;
 
 	std::vector<WordDist*> related_words;
 	
